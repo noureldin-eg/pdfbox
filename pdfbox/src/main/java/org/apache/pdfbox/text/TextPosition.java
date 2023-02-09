@@ -170,6 +170,24 @@ public final class TextPosition
         return unicode;
     }
 
+    public String getOrderedUnicode()
+    {
+        final String text = getUnicode();
+        final int length = text.length();
+        for (int index = 0, nextIndex; index < length; index = nextIndex)
+        {
+            int codePoint = text.codePointAt(index);
+            nextIndex = index + Character.charCount(codePoint);
+            byte directionality = Character.getDirectionality(codePoint);
+            if (directionality == Character.DIRECTIONALITY_RIGHT_TO_LEFT_ARABIC
+                    && (index != 0 || nextIndex < length))
+            {
+                return new StringBuilder(text).reverse().toString();
+            }
+        }
+        return text;
+    }
+
     /**
      * Return the internal PDF character codes of the glyphs in this text.
      *

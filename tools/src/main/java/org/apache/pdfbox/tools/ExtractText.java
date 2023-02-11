@@ -61,6 +61,7 @@ public final class ExtractText
     private static final String START_PAGE = "-startPage";
     private static final String END_PAGE = "-endPage";
     private static final String SORT = "-sort";
+    private static final String IGNORE_DIACRITICS = "-ignoreDiacritics";
     private static final String IGNORE_BEADS = "-ignoreBeads";
     private static final String DEBUG = "-debug";
     private static final String HTML = "-html";
@@ -107,6 +108,7 @@ public final class ExtractText
         boolean toConsole = false;
         boolean toHTML = false;
         boolean sort = false;
+        boolean ignoreDiacritics = false;
         boolean separateBeads = true;
         boolean alwaysNext = false;
         boolean rotationMagic = false;
@@ -156,6 +158,10 @@ public final class ExtractText
             else if( args[i].equals( SORT ) )
             {
                 sort = true;
+            }
+            else if( args[i].equals( IGNORE_DIACRITICS ) )
+            {
+                ignoreDiacritics = true;
             }
             else if( args[i].equals( IGNORE_BEADS ) )
             {
@@ -250,6 +256,7 @@ public final class ExtractText
                     // HTML stripper can't work page by page because of startDocument() callback
                     stripper = new PDFText2HTML();
                     stripper.setSortByPosition(sort);
+                    stripper.setIgnoreDiacritics(ignoreDiacritics);
                     stripper.setShouldSeparateByBeads(separateBeads);
                     stripper.setStartPage(startPage);
                     stripper.setEndPage(endPage);
@@ -268,6 +275,7 @@ public final class ExtractText
                         stripper = new PDFTextStripper();
                     }
                     stripper.setSortByPosition(sort);
+                    stripper.setIgnoreDiacritics(ignoreDiacritics);
                     stripper.setShouldSeparateByBeads(separateBeads);
 
                     // Extract text for main document:
@@ -427,6 +435,7 @@ public final class ExtractText
             + "  -console                    : Send text to console instead of file\n"
             + "  -html                       : Output in HTML format instead of raw text\n"
             + "  -sort                       : Sort the text before writing\n"
+            + "  -ignoreDiacritics           : Remove all Diacritics\n"
             + "  -ignoreBeads                : Disables the separation by beads\n"
             + "  -debug                      : Enables debug output about the time consumption\n"
             + "                                of every stage\n"

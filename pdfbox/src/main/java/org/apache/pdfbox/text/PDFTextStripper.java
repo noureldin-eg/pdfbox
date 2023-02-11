@@ -494,6 +494,11 @@ public class PDFTextStripper extends LegacyPDFStreamEngine
 
         for (List<TextPosition> textList : charactersByArticle)
         {
+            if (ignoreDiacritics)
+            {
+                removeDiacritics(textList);
+            }
+    
             if (getSortByPosition())
             {
                 TextPositionComparator comparator = new TextPositionComparator();
@@ -739,6 +744,19 @@ public class PDFTextStripper extends LegacyPDFStreamEngine
             {
                 previousPosition = position;
             } 
+        }
+    }
+
+    private void removeDiacritics(List<TextPosition> textList)
+    {
+        Iterator<TextPosition> iterator = textList.iterator();
+        while (iterator.hasNext()) 
+        {
+            TextPosition position = iterator.next();
+            if (position.getWidthDirAdj() == 0)
+            {
+                iterator.remove();
+            }
         }
     }
 
@@ -1219,6 +1237,11 @@ public class PDFTextStripper extends LegacyPDFStreamEngine
         sortByPosition = newSortByPosition;
     }
 
+    public void setIgnoreDiacritics(boolean ignoreDiacritics)
+    {
+        this.ignoreDiacritics = ignoreDiacritics;
+    }
+    
     /**
      * Get the current space width-based tolerance value that is being used to estimate where spaces in text should be
      * added. Note that the default value for this has been determined from trial and error.
@@ -1661,6 +1684,7 @@ public class PDFTextStripper extends LegacyPDFStreamEngine
             "[ivxl]+\\.", };
 
     private List<Pattern> listOfPatterns = null;
+    private boolean ignoreDiacritics;
 
     /**
      * use to supply a different set of regular expression patterns for matching list item starts.

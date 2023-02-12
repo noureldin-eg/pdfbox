@@ -114,6 +114,7 @@ public class PDFTextStripper extends LegacyPDFStreamEngine
      * The platform's line separator.
      */
     protected final String LINE_SEPARATOR = System.getProperty("line.separator");
+    private final String ARABIC_TATWEEL = "\u0640";
 
     private String lineSeparator = LINE_SEPARATOR;
     private String wordSeparator = " ";
@@ -753,7 +754,7 @@ public class PDFTextStripper extends LegacyPDFStreamEngine
         while (iterator.hasNext()) 
         {
             TextPosition position = iterator.next();
-            if (position.getWidthDirAdj() == 0)
+            if (position.getWidthDirAdj() == 0 || position.getUnicode().contains(ARABIC_TATWEEL))
             {
                 iterator.remove();
             }

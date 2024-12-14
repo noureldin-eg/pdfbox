@@ -20,8 +20,8 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
 import org.apache.pdfbox.cos.COSDictionary;
 import org.apache.pdfbox.util.Hex;
 
@@ -32,7 +32,7 @@ import org.apache.pdfbox.util.Hex;
  */
 final class ASCIIHexFilter extends Filter
 {
-    private static final Log LOG = LogFactory.getLog(ASCIIHexFilter.class);
+    private static final Logger LOG = LogManager.getLogger(ASCIIHexFilter.class);
 
     private static final int[] REVERSE_HEX = {
       /*   0 */  -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
@@ -82,7 +82,7 @@ final class ASCIIHexFilter extends Filter
        
             if (REVERSE_HEX[firstByte] == -1)
             {
-                LOG.error("Invalid hex, int: " + firstByte + " char: " + (char)firstByte);
+                LOG.error("Invalid hex, int: {} char: {}", firstByte, (char) firstByte);
             }
             value = REVERSE_HEX[firstByte] * 16;
             secondByte = encoded.read();
@@ -95,7 +95,7 @@ final class ASCIIHexFilter extends Filter
             }
             if (REVERSE_HEX[secondByte] == -1)
             {
-                LOG.error("Invalid hex, int: " + secondByte + " char: " + (char) secondByte);
+                LOG.error("Invalid hex, int: {} char: {}", secondByte, (char) secondByte);
             }
             value += REVERSE_HEX[secondByte];
             decoded.write(value);
@@ -111,12 +111,23 @@ final class ASCIIHexFilter extends Filter
     //  12  0x0C  Form feed (FF)
     //  13  0x0D  Carriage return (CR)
     //  32  0x20  Space (SP)
-    private boolean isWhitespace(int c)
+    private static boolean isWhitespace(int c)
     {
-        return c == 0 || c == 9 || c == 10 || c == 12 || c == 13 || c == 32;
+        switch (c)
+        {
+        case 0:
+        case 9:
+        case 10:
+        case 12:
+        case 13:
+        case 32:
+            return true;
+        default:
+            return false;
+        }
     }
 
-    private boolean isEOD(int c)
+    private static boolean isEOD(int c)
     {
         return c == '>';
     }

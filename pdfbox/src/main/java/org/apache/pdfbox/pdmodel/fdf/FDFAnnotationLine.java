@@ -18,6 +18,7 @@ package org.apache.pdfbox.pdmodel.fdf;
 
 import java.awt.Color;
 import java.io.IOException;
+import java.util.Arrays;
 
 import org.apache.pdfbox.cos.COSArray;
 import org.apache.pdfbox.cos.COSDictionary;
@@ -44,7 +45,6 @@ public class FDFAnnotationLine extends FDFAnnotation
      */
     public FDFAnnotationLine()
     {
-        super();
         annot.setName(COSName.SUBTYPE, SUBTYPE);
     }
 
@@ -130,27 +130,27 @@ public class FDFAnnotationLine extends FDFAnnotation
         }
 
         String caption = element.getAttribute("caption");
-        if (caption != null && !caption.isEmpty())
+        if ("yes".equals(caption))
         {
-            setCaption("yes".equals(caption));
-        }
+            setCaption(true);
 
-        String captionH = element.getAttribute("caption-offset-h");
-        if (captionH != null && !captionH.isEmpty())
-        {
-            setCaptionHorizontalOffset(Float.parseFloat(captionH));
-        }
+            String captionH = element.getAttribute("caption-offset-h");
+            if (captionH != null && !captionH.isEmpty())
+            {
+                setCaptionHorizontalOffset(Float.parseFloat(captionH));
+            }
 
-        String captionV = element.getAttribute("caption-offset-v");
-        if (captionV != null && !captionV.isEmpty())
-        {
-            setCaptionVerticalOffset(Float.parseFloat(captionV));
-        }
+            String captionV = element.getAttribute("caption-offset-v");
+            if (captionV != null && !captionV.isEmpty())
+            {
+                setCaptionVerticalOffset(Float.parseFloat(captionV));
+            }
 
-        String captionStyle = element.getAttribute("caption-style");
-        if (captionStyle != null && !captionStyle.isEmpty())
-        {
-            setCaptionStyle(captionStyle);
+            String captionStyle = element.getAttribute("caption-style");
+            if (captionStyle != null && !captionStyle.isEmpty())
+            {
+                setCaptionStyle(captionStyle);
+            }
         }
     }
 
@@ -161,9 +161,7 @@ public class FDFAnnotationLine extends FDFAnnotation
      */
     public final void setLine(float[] line)
     {
-        COSArray newLine = new COSArray();
-        newLine.setFloatArray(line);
-        annot.setItem(COSName.L, newLine);
+        annot.setItem(COSName.L, COSArray.of(line));
     }
 
     /**
@@ -188,9 +186,10 @@ public class FDFAnnotationLine extends FDFAnnotation
         COSArray array = annot.getCOSArray(COSName.LE);
         if (array == null)
         {
-            array = new COSArray();
-            array.add(COSName.getPDFName(actualStyle));
-            array.add(COSName.getPDFName(PDAnnotationLine.LE_NONE));
+            array = new COSArray(Arrays.asList(
+                COSName.getPDFName(actualStyle),
+                COSName.getPDFName(PDAnnotationLine.LE_NONE)
+            ));
             annot.setItem(COSName.LE, array);
         }
         else
@@ -221,9 +220,10 @@ public class FDFAnnotationLine extends FDFAnnotation
         COSArray array = annot.getCOSArray(COSName.LE);
         if (array == null)
         {
-            array = new COSArray();
-            array.add(COSName.getPDFName(PDAnnotationLine.LE_NONE));
-            array.add(COSName.getPDFName(actualStyle));
+            array = new COSArray(Arrays.asList(
+                COSName.getPDFName(PDAnnotationLine.LE_NONE),
+                COSName.getPDFName(actualStyle)
+            ));
             annot.setItem(COSName.LE, array);
         }
         else
@@ -253,9 +253,7 @@ public class FDFAnnotationLine extends FDFAnnotation
         COSArray array = null;
         if (color != null)
         {
-            float[] colors = color.getRGBColorComponents(null);
-            array = new COSArray();
-            array.setFloatArray(colors);
+            array = COSArray.of(color.getRGBColorComponents(null));
         }
         annot.setItem(COSName.IC, array);
     }
@@ -390,8 +388,7 @@ public class FDFAnnotationLine extends FDFAnnotation
         COSArray array = annot.getCOSArray(COSName.CO);
         if (array == null)
         {
-            array = new COSArray();
-            array.setFloatArray(new float[] { offset, 0.f });
+            array = COSArray.of(offset, 0.f);
             annot.setItem(COSName.CO, array);
         }
         else
@@ -421,9 +418,7 @@ public class FDFAnnotationLine extends FDFAnnotation
         COSArray array = annot.getCOSArray(COSName.CO);
         if (array == null)
         {
-            array = new COSArray();
-            array.setFloatArray(new float[] { 0.f, offset });
-            annot.setItem(COSName.CO, array);
+            annot.setItem(COSName.CO, COSArray.of(0.f, offset));
         }
         else
         {

@@ -72,9 +72,9 @@ public final class ExtractImages implements Callable<Integer>
 {
     // Expected for CLI app to write to System.out/System.err
     @SuppressWarnings("squid:S106")
-    private static final PrintStream SYSOUT = System.out;
+    private final PrintStream SYSOUT;
     @SuppressWarnings("squid:S106")
-    private static final PrintStream SYSERR = System.err;
+    private final PrintStream SYSERR;
 
     private static final List<String> JPEG = Arrays.asList(
             COSName.DCT_DECODE.getName(),
@@ -99,6 +99,15 @@ public final class ExtractImages implements Callable<Integer>
 
     private final Set<COSStream> seen = new HashSet<>();
     private int imageCounter = 1;
+
+    /**
+     * Constructor.
+     */
+    public ExtractImages()
+    {
+        SYSOUT = System.out;
+        SYSERR = System.err;
+    }
 
     /**
      * Entry point for the application.
@@ -384,7 +393,7 @@ public final class ExtractImages implements Callable<Integer>
                     {
                         // RGB or Gray colorspace: get and write the unmodified JPEG stream
                         InputStream data = pdImage.createInputStream(JPEG);
-                        IOUtils.copy(data, imageOutput);
+                        data.transferTo(imageOutput);
                         IOUtils.closeQuietly(data);
                     }
                     else
@@ -407,7 +416,7 @@ public final class ExtractImages implements Callable<Integer>
                         // RGB or Gray colorspace: get and write the unmodified JPEG2000 stream
                         InputStream data = pdImage.createInputStream(
                                 Collections.singletonList(COSName.JPX_DECODE.getName()));
-                        IOUtils.copy(data, imageOutput);
+                        data.transferTo(imageOutput);
                         IOUtils.closeQuietly(data);
                     }
                     else

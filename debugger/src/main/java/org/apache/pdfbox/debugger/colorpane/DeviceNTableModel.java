@@ -20,16 +20,13 @@ import java.awt.Color;
 import javax.swing.table.AbstractTableModel;
 
 /**
- * @author Khyrul Bashar.
- */
-
-/**
  * This the table model for showing DeviceN color space which extends AbstractTableModel.
+ * @author Khyrul Bashar.
  */
 @SuppressWarnings({"serial","squid:S1948"})
 public class DeviceNTableModel extends AbstractTableModel
 {
-    private static final String[] COLUMNNAMES = new String[] { "Colorant", "Maximum", "Minimum"};
+    private static final String[] COLUMNNAMES = { "Colorant", "Maximum", "Minimum"};
     private final DeviceNColorant[] data;
 
     /**

@@ -23,8 +23,8 @@ import javax.xml.xpath.XPath;
 import javax.xml.xpath.XPathConstants;
 import javax.xml.xpath.XPathExpressionException;
 import javax.xml.xpath.XPathFactory;
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
 import org.apache.pdfbox.cos.COSArray;
 import org.apache.pdfbox.cos.COSBase;
 import org.apache.pdfbox.cos.COSDictionary;
@@ -53,7 +53,7 @@ import org.w3c.dom.Text;
  * */
 public abstract class FDFAnnotation implements COSObjectable
 {
-    private static final Log LOG = LogFactory.getLog(FDFAnnotation.class);
+    private static final Logger LOG = LogManager.getLogger(FDFAnnotation.class);
 
     /**
      * An annotation flag.
@@ -205,9 +205,7 @@ public abstract class FDFAnnotation implements COSObjectable
         {
             values[i] = Float.parseFloat(rectValues[i]);
         }
-        COSArray array = new COSArray();
-        array.setFloatArray(values);
-        setRectangle(new PDRectangle(array));
+        setRectangle(new PDRectangle(COSArray.of(values)));
 
         setTitle(element.getAttribute("title"));
 
@@ -228,7 +226,10 @@ public abstract class FDFAnnotation implements COSObjectable
             // not conforming to spec, but qoppa produces it and Adobe accepts it
             intent = element.getAttribute("IT");
         }
-        setIntent(intent);
+        if (!intent.isEmpty())
+        {
+            setIntent(intent);
+        }
 
         XPath xpath = XPathFactory.newInstance().newXPath();
         try
@@ -269,21 +270,21 @@ public abstract class FDFAnnotation implements COSObjectable
                 switch (style)
                 {
                     case "dash":
-                        borderStyle.setStyle("D");
+                        borderStyle.setStyle(PDBorderStyleDictionary.STYLE_DASHED);
                         break;
                     case "bevelled":
-                        borderStyle.setStyle("B");
+                        borderStyle.setStyle(PDBorderStyleDictionary.STYLE_BEVELED);
                         break;
                     case "inset":
-                        borderStyle.setStyle("I");
+                        borderStyle.setStyle(PDBorderStyleDictionary.STYLE_INSET);
                         break;
                     case "underline":
-                        borderStyle.setStyle("U");
+                        borderStyle.setStyle(PDBorderStyleDictionary.STYLE_SOLID);
                         break;
                     case "cloudy":
-                        borderStyle.setStyle("S");
+                        borderStyle.setStyle(PDBorderStyleDictionary.STYLE_SOLID);
                         PDBorderEffectDictionary borderEffect = new PDBorderEffectDictionary();
-                        borderEffect.setStyle("C");
+                        borderEffect.setStyle(PDBorderEffectDictionary.STYLE_CLOUDY);
                         String intensity = element.getAttribute("intensity");
                         if (intensity != null && !intensity.isEmpty())
                         {
@@ -293,7 +294,7 @@ public abstract class FDFAnnotation implements COSObjectable
                         setBorderEffect(borderEffect);
                         break;
                     default:
-                        borderStyle.setStyle("S");
+                        borderStyle.setStyle(PDBorderStyleDictionary.STYLE_SOLID);
                         break;
                 }
             }
@@ -395,7 +396,7 @@ public abstract class FDFAnnotation implements COSObjectable
             }
             else
             {
-                LOG.warn("Unknown or unsupported annotation type '" + fdfDicName + "'");
+                LOG.warn("Unknown or unsupported annotation type '{}'", fdfDicName);
             }
         }
         return retval;
@@ -468,9 +469,7 @@ public abstract class FDFAnnotation implements COSObjectable
         COSArray color = null;
         if (c != null)
         {
-            float[] colors = c.getRGBColorComponents(null);
-            color = new COSArray();
-            color.setFloatArray(colors);
+            color = COSArray.of(c.getRGBColorComponents(null));
         }
         annot.setItem(COSName.C, color);
     }
@@ -968,16 +967,16 @@ public abstract class FDFAnnotation implements COSObjectable
             }
             else if (child instanceof CDATASection)
             {
-            	sb.append("<![CDATA[").append(((CDATASection) child).getData()).append("]]>");
+                sb.append("<![CDATA[").append(((CDATASection) child).getData()).append("]]>");
             }
             else if (child instanceof Text)
             {
-            	String cdata = ((Text) child).getData();
-            	if (cdata!=null)
-            	{
-            		cdata = cdata.replace("&", "&amp;").replace("<", "&lt;");
-            	}
-            	sb.append(cdata);
+                String cdata = ((Text) child).getData();
+                if (cdata!=null)
+                {
+                    cdata = cdata.replace("&", "&amp;").replace("<", "&lt;");
+                }
+                sb.append(cdata);
             }
         }
         if (root)
@@ -993,12 +992,11 @@ public abstract class FDFAnnotation implements COSObjectable
             String attributeNodeValue = attribute.getNodeValue();
             if (attributeNodeValue!=null)
             {
-            	attributeNodeValue = attributeNodeValue.replace("\"", "&quot;");
+                attributeNodeValue = attributeNodeValue.replace("\"", "&quot;");
             }
             builder.append(String.format(" %s=\"%s\"", attribute.getNodeName(),
                     attributeNodeValue));
         }
-        return String.format("<%s%s>%s</%s>", node.getNodeName(), builder.toString(),
-                sb.toString(), node.getNodeName());
+        return String.format("<%s%s>%s</%s>", node.getNodeName(), builder, sb, node.getNodeName());
     }
 }

@@ -24,8 +24,8 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
 import org.apache.fontbox.cmap.CMap;
 import org.apache.fontbox.ttf.CmapLookup;
 import org.apache.fontbox.ttf.TTFParser;
@@ -50,7 +50,7 @@ import org.apache.pdfbox.util.Vector;
  */
 public class PDType0Font extends PDFont implements PDVectorFont
 {
-    private static final Log LOG = LogFactory.getLog(PDType0Font.class);
+    private static final Logger LOG = LogManager.getLogger(PDType0Font.class);
 
     private final PDCIDFont descendantFont;
     private final Set<Integer> noUnicode = new HashSet<>(); 
@@ -80,7 +80,7 @@ public class PDType0Font extends PDFont implements PDVectorFont
         {
             throw new IOException("Missing descendant font array");
         }
-        if (descendantFonts.size() == 0)
+        if (descendantFonts.isEmpty())
         {
             throw new IOException("Descendant font array is empty");
         }
@@ -337,7 +337,7 @@ public class PDType0Font extends PDFont implements PDVectorFont
             }
             else if (!cMap.hasCIDMappings())
             {
-                LOG.warn("Invalid Encoding CMap in font " + getName());
+                LOG.warn("Invalid Encoding CMap in font {}", getName());
             }
         }
         
@@ -541,6 +541,12 @@ public class PDType0Font extends PDFont implements PDVectorFont
         {
             return unicode;
         }
+        // Use identity mapping if the given ToUnicode CMap doesn't provide any valid mapping
+        // a predefined map shall only be used if there isn't any ToUnicode CMap
+        if (getToUnicodeCMap() != null)
+        {
+            return Character.toString(code);
+        }
 
         if ((isCMapPredefined || isDescendantCJK) && cMapUCS2 != null)
         {
@@ -595,7 +601,7 @@ public class PDType0Font extends PDFont implements PDVectorFont
         {
             // if no value has been produced, there is no way to obtain Unicode for the character.
             String cid = "CID+" + codeToCID(code);
-            LOG.warn("No Unicode mapping for " + cid + " (" + code + ") in font " + getName());
+            LOG.warn("No Unicode mapping for {} ({}) in font {}", cid, code, getName());
             // we keep track of which warnings have been issued, so we don't log multiple times
             noUnicode.add(code);
         }

@@ -16,20 +16,16 @@
  */
 package org.apache.pdfbox.cos;
 
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
 import java.io.FilterOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
 import org.apache.pdfbox.filter.DecodeOptions;
 import org.apache.pdfbox.filter.Filter;
 import org.apache.pdfbox.filter.FilterFactory;
@@ -60,7 +56,7 @@ public class COSStream extends COSDictionary implements Closeable
     // random access view to be read from
     private RandomAccessReadView randomAccessReadView;
     
-    private static final Log LOG = LogFactory.getLog(COSStream.class);
+    private static final Logger LOG = LogManager.getLogger(COSStream.class);
     
     /**
      * Creates a new stream with an empty dictionary.
@@ -197,37 +193,7 @@ public class COSStream extends COSDictionary implements Closeable
                 return new RandomAccessReadBuffer(createRawInputStream());
             }
         }
-        else
-        {
-            if (filterList.size() > 1)
-            {
-                Set<Filter> filterSet = new HashSet<>(filterList);
-                if (filterSet.size() != filterList.size())
-                {
-                    throw new IOException("Duplicate");
-                }
-            }
-            InputStream input = createRawInputStream();
-            ByteArrayOutputStream output = new ByteArrayOutputStream(input.available());
-            // apply filters
-            for (int i = 0; i < filterList.size(); i++)
-            {
-                if (i > 0)
-                {
-                    input = new ByteArrayInputStream(output.toByteArray());
-                    output.reset();
-                }
-                try
-                {
-                    filterList.get(i).decode(input, output, this, i, DecodeOptions.DEFAULT);
-                }
-                finally
-                {
-                    IOUtils.closeQuietly(input);
-                }
-            }
-            return new RandomAccessReadBuffer(output.toByteArray());
-        }
+        return Filter.decode(createRawInputStream(), filterList, this, DecodeOptions.DEFAULT, null);
     }
 
     /**
@@ -398,7 +364,7 @@ public class COSStream extends COSDictionary implements Closeable
     {
         try (InputStream input = createInputStream())
         {
-            byte[] array = IOUtils.toByteArray(input);
+            byte[] array = input.readAllBytes();
             COSString string = new COSString(array);
             return string.getString();
         }

@@ -20,6 +20,8 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.net.URL;
 import java.security.GeneralSecurityException;
 import java.security.MessageDigest;
@@ -34,8 +36,8 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
 import org.apache.pdfbox.cos.COSArray;
 import org.apache.pdfbox.cos.COSBase;
 import org.apache.pdfbox.cos.COSDictionary;
@@ -71,7 +73,7 @@ import org.bouncycastle.util.Store;
  */
 public class SigUtils
 {
-    private static final Log LOG = LogFactory.getLog(SigUtils.class);
+    private static final Logger LOG = LogManager.getLogger(SigUtils.class);
 
     private SigUtils()
     {
@@ -158,11 +160,13 @@ public class SigUtils
         COSDictionary sigDict = signature.getCOSObject();
 
         // DocMDP specific stuff
+        // all values in the signature dictionary shall be direct objects
         COSDictionary transformParameters = new COSDictionary();
         transformParameters.setItem(COSName.TYPE, COSName.TRANSFORM_PARAMS);
         transformParameters.setInt(COSName.P, accessPermissions);
         transformParameters.setName(COSName.V, "1.2");
         transformParameters.setNeedToBeUpdated(true);
+        transformParameters.setDirect(true);
 
         COSDictionary referenceDict = new COSDictionary();
         referenceDict.setItem(COSName.TYPE, COSName.SIG_REF);
@@ -170,11 +174,13 @@ public class SigUtils
         referenceDict.setItem(COSName.DIGEST_METHOD, COSName.getPDFName("SHA1"));
         referenceDict.setItem(COSName.TRANSFORM_PARAMS, transformParameters);
         referenceDict.setNeedToBeUpdated(true);
+        referenceDict.setDirect(true);
 
         COSArray referenceArray = new COSArray();
         referenceArray.add(referenceDict);
         sigDict.setItem(COSName.REFERENCE, referenceArray);
         referenceArray.setNeedToBeUpdated(true);
+        referenceArray.setDirect(true);
 
         // Catalog
         COSDictionary catalogDict = doc.getDocumentCatalog().getCOSObject();
@@ -272,9 +278,7 @@ public class SigUtils
         // if a signature is assigned to a pre-defined empty signature field that isn't the last.
         // we get the last in time by looking at the offset in the PDF file.
         Optional<PDSignature> optLastSignature =
-                document.getSignatureDictionaries().stream().
-                sorted(comparatorByOffset.reversed()).
-                findFirst();
+                document.getSignatureDictionaries().stream().max(comparatorByOffset);
         if (optLastSignature.isPresent())
         {
             PDSignature lastSignature = optLastSignature.get();
@@ -308,7 +312,7 @@ public class SigUtils
     }
 
     public static void validateTimestampToken(TimeStampToken timeStampToken)
-            throws TSPException, CertificateException, OperatorCreationException, IOException
+            throws TSPException, CertificateException, OperatorCreationException
     {
         // https://stackoverflow.com/questions/42114742/
         @SuppressWarnings("unchecked") // TimeStampToken.getSID() is untyped
@@ -362,12 +366,13 @@ public class SigUtils
      *
      * @throws GeneralSecurityException
      * @throws IOException 
+     * @throws URISyntaxException 
      */
     public static X509Certificate getTsaCertificate(String tsaUrl)
-            throws GeneralSecurityException, IOException
+            throws GeneralSecurityException, IOException, URISyntaxException
     {
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
-        TSAClient tsaClient = new TSAClient(new URL(tsaUrl), null, null, digest);
+        TSAClient tsaClient = new TSAClient(new URI(tsaUrl).toURL(), null, null, digest);
         InputStream emptyStream = new ByteArrayInputStream(new byte[0]);
         TimeStampToken timeStampToken = tsaClient.getTimeStampToken(emptyStream);
         return getCertificateFromTimeStampToken(timeStampToken);
@@ -406,8 +411,9 @@ public class SigUtils
                 ++n;
                 while (n < key.getNumber())
                 {
-                    LOG.warn("Object " + n + " missing, signature verification may fail in " +
-                             "Adobe Reader, see https://stackoverflow.com/questions/71267471/");
+                    LOG.warn(
+                            "Object {} missing, signature verification may fail in Adobe Reader, see https://stackoverflow.com/questions/71267471/",
+                            n);
                     ++n;
                 }
             }
@@ -420,10 +426,11 @@ public class SigUtils
      * @param urlString
      * @return
      * @throws IOException 
+     * @throws URISyntaxException 
      */
-    public static InputStream openURL(String urlString) throws IOException
+    public static InputStream openURL(String urlString) throws IOException, URISyntaxException
     {
-        URL url = new URL(urlString);
+        URL url = new URI(urlString).toURL();
         if (!urlString.startsWith("http"))
         {
             // so that ftp is still supported
@@ -431,7 +438,7 @@ public class SigUtils
         }
         HttpURLConnection con = (HttpURLConnection) url.openConnection();
         int responseCode = con.getResponseCode();
-        LOG.info(responseCode + " " + con.getResponseMessage());
+        LOG.info("{} {}", responseCode, con.getResponseMessage());
         if (responseCode == HttpURLConnection.HTTP_MOVED_TEMP ||
             responseCode == HttpURLConnection.HTTP_MOVED_PERM ||
             responseCode == HttpURLConnection.HTTP_SEE_OTHER)
@@ -443,13 +450,13 @@ public class SigUtils
             {
                 // redirection from http:// to https://
                 // change this code if you want to be more flexible (but think about security!)
-                LOG.info("redirection to " + location + " followed");
+                LOG.info("redirection to {} followed", location);
                 con.disconnect();
-                con = (HttpURLConnection) new URL(location).openConnection();
+                con = (HttpURLConnection) new URI(location).toURL().openConnection();
             }
             else
             {
-                LOG.info("redirection to " + location + " ignored");
+                LOG.info("redirection to {} ignored", location);
             }
         }
         return new ConnectedInputStream(con, con.getInputStream());

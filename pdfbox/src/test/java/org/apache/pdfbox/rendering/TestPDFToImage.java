@@ -25,8 +25,8 @@ import java.io.FileOutputStream;
 import java.io.FilenameFilter;
 import java.io.IOException;
 import javax.imageio.ImageIO;
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 
@@ -60,10 +60,7 @@ public class TestPDFToImage
     /**
      * Logger instance.
      */
-    private static final Log LOG = LogFactory.getLog(TestPDFToImage.class);
-
-    static String inDir = "src/test/resources/input/rendering";
-    static String outDir = "target/test-output/rendering/";
+    private static final Logger LOG = LogManager.getLogger(TestPDFToImage.class);
 
     /**
      * Constructor.
@@ -172,35 +169,40 @@ public class TestPDFToImage
         PDDocument document = null;
         boolean failed = false;
 
-        LOG.info("Opening: " + file.getName());
+        LOG.info("Opening: {}", file.getName());
         try
         {
             new FileOutputStream(new File(outDir, file.getName() + ".parseerror")).close();
             document = Loader.loadPDF(file, (String) null);
-            String outputPrefix = outDir + '/' + file.getName() + "-";
             int numPages = document.getNumberOfPages();
             if (numPages < 1)
             {
                 failed = true;
-                LOG.error("file " + file.getName() + " has < 1 page");
+                LOG.error("file {} has < 1 page", file.getName());
             }
             else
             {
                 new File(outDir, file.getName() + ".parseerror").delete();
+                new File(outDir, file.getName() + ".parseerror").deleteOnExit();
             }
 
-            LOG.info("Rendering: " + file.getName());
+            LOG.info("Rendering: {}", file.getName());
             PDFRenderer renderer = new PDFRenderer(document);
             for (int i = 0; i < numPages; i++)
             {
-                String fileName = outputPrefix + (i + 1) + ".png";
-                new FileOutputStream(new File(fileName + ".rendererror")).close();
+                String fileName = file.getName() + "-" + (i + 1) + ".png";
+                new FileOutputStream(new File(outDir, fileName + ".rendererror")).close();
                 BufferedImage image = renderer.renderImageWithDPI(i, 96); // Windows native DPI
-                new File(fileName + ".rendererror").delete();
-                LOG.info("Writing: " + fileName);
-                new FileOutputStream(new File(fileName + ".writeerror")).close();
-                ImageIO.write(image, "PNG", new File(fileName));
-                new File(fileName + ".writeerror").delete();
+                new File(outDir, fileName + ".rendererror").delete();
+                new File(outDir, fileName + ".rendererror").deleteOnExit();
+                LOG.info("Writing: {}", fileName);
+                new FileOutputStream(new File(outDir, fileName + ".writeerror")).close();
+                boolean writeSuccess = ImageIO.write(image, "PNG", new File(outDir, fileName));
+                if (writeSuccess)
+                {
+                    new File(outDir, fileName + ".writeerror").delete();
+                    new File(outDir, fileName + ".writeerror").deleteOnExit();
+                }
             }
 
             // test to see whether file is destroyed in pdfbox
@@ -209,15 +211,18 @@ public class TestPDFToImage
             document.setAllSecurityToBeRemoved(true);
             document.save(tmpFile);
             new File(outDir, file.getName() + ".saveerror").delete();
+            new File(outDir, file.getName() + ".saveerror").deleteOnExit();
             new FileOutputStream(new File(outDir, file.getName() + ".reloaderror")).close();
-            Loader.loadPDF(tmpFile, (String) null).close();
+            Loader.loadPDF(tmpFile).close();
             new File(outDir, file.getName() + ".reloaderror").delete();
+            new File(outDir, file.getName() + ".reloaderror").deleteOnExit();
             tmpFile.delete();
+            tmpFile.deleteOnExit();
         }
         catch (IOException e)
         {
             failed = true;
-            LOG.error("Error converting file " + file.getName());
+            LOG.error("Error converting file {}", file.getName());
             throw e;
         }
         finally
@@ -228,12 +233,12 @@ public class TestPDFToImage
             }
         }
 
-        LOG.info("Comparing: " + file.getName());
+        LOG.info("Comparing: {}", file.getName());
 
         //Now check the resulting files ... did we get identical PNG(s)?
         try
         {
-            new File(outDir + file.getName() + ".cmperror").delete();
+            new File(outDir, file.getName() + ".cmperror").delete();
 
             File[] outFiles = new File(outDir).listFiles(new FilenameFilter()
             {
@@ -241,14 +246,14 @@ public class TestPDFToImage
                 public boolean accept(File dir, String name)
                 {
                     return (name.endsWith(".png")
-                            && name.startsWith(file.getName(), 0))
+                            && name.startsWith(file.getName()))
                             && !name.endsWith(".png-diff.png");
                 }
             });
             if (outFiles.length == 0)
             {
                 failed = true;
-                LOG.warn("*** TEST FAILURE *** Output missing for file: " + file.getName());
+                LOG.warn("*** TEST FAILURE *** Output missing for file: {}", file.getName());
             }
             for (File outFile : outFiles)
             {
@@ -257,7 +262,7 @@ public class TestPDFToImage
                 if (!inFile.exists())
                 {
                     failed = true;
-                    LOG.warn("*** TEST FAILURE *** Input missing for file: " + inFile.getName());
+                    LOG.warn("*** TEST FAILURE *** Input missing for file: {}", inFile.getName());
                 }
                 else if (!filesAreIdentical(outFile, inFile))
                 {
@@ -267,23 +272,24 @@ public class TestPDFToImage
                     if (bim3 != null)
                     {
                         failed = true;
-                        LOG.warn("*** TEST FAILURE *** Input and output not identical for file: " + inFile.getName());
+                        LOG.warn("*** TEST FAILURE *** Input and output not identical for file: {}",
+                                inFile.getName());
                         ImageIO.write(bim3, "png", new File(outFile.getAbsolutePath() + "-diff.png"));
                         System.err.println("Files differ: "  + inFile.getAbsolutePath() + "\n" +
                                            "              " + outFile.getAbsolutePath());
                     }
                     else
                     {
-                        LOG.info("*** TEST OK *** for file: " + inFile.getName());
-                        LOG.info("Deleting: " + outFile.getName());
+                        LOG.info("*** TEST OK *** for file: {}", inFile.getName());
+                        LOG.info("Deleting: {}", outFile.getName());
                         outFile.delete();
                         outFile.deleteOnExit();
                     }
                 }
                 else
                 {
-                    LOG.info("*** TEST OK *** for file: " + inFile.getName());
-                    LOG.info("Deleting: " + outFile.getName());
+                    LOG.info("*** TEST OK *** for file: {}", inFile.getName());
+                    LOG.info("Deleting: {}", outFile.getName());
                     outFile.delete();
                     outFile.deleteOnExit();
                 }
@@ -293,7 +299,7 @@ public class TestPDFToImage
         {
             new FileOutputStream(new File(outDir, file.getName() + ".cmperror")).close();
             failed = true;
-            LOG.error("Error comparing file output for " + file.getName(), e);
+            LOG.error(() -> "Error comparing file output for " + file.getName(), e);
         }
 
         return !failed;

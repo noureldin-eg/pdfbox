@@ -24,6 +24,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.Arrays;
 import java.util.List;
 
+import org.apache.pdfbox.pdmodel.common.COSObjectable;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
@@ -37,7 +38,8 @@ class TestCOSArray
     {
         COSArray cosArray = new COSArray();
         assertEquals(0, cosArray.size());
-        Assertions.assertThrows(IllegalArgumentException.class, () -> new COSArray(null),
+        Assertions.assertThrows(NullPointerException.class, () -> new COSArray(
+                        (List<? extends COSObjectable>) null),
                 "Constructor should have thrown an exception");
 
         cosArray = new COSArray(Arrays.asList(COSName.A, COSName.B, COSName.C));
@@ -112,12 +114,12 @@ class TestCOSArray
     @Test
     void testConvertFloat2COSStringAndBack()
     {
-        float[] floatArrayStart = new float[] { 1.0f, 0.1f, 0.02f };
+        float[] floatArrayStart = { 1.0f, 0.1f, 0.02f };
         COSArray cosArray = new COSArray();
         cosArray.setFloatArray(floatArrayStart);
 
         assertEquals(3, cosArray.size());
-        assertEquals(new COSFloat(1.0f), cosArray.get(0));
+        assertEquals(COSFloat.ONE, cosArray.get(0));
         assertEquals(new COSFloat(0.1f), cosArray.get(1));
         assertEquals(new COSFloat(0.02f), cosArray.get(2));
 
@@ -134,9 +136,9 @@ class TestCOSArray
         assertArrayEquals(floatArrayStart, floatArrayEnd, 0);
 
         // check arrays with null values
-        cosArray = new COSArray(Arrays.asList(new COSFloat(1.0f), null, new COSFloat(0.02f)));
+        cosArray = new COSArray(Arrays.asList(COSFloat.ONE, null, new COSFloat(0.02f)));
         assertEquals(3, cosArray.size());
-        assertEquals(new COSFloat(1.0f), cosArray.get(0));
+        assertEquals(COSFloat.ONE, cosArray.get(0));
         assertNull(cosArray.get(1));
         assertEquals(new COSFloat(0.02f), cosArray.get(2));
 

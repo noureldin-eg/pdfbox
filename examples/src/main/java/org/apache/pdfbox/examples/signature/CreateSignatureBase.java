@@ -18,6 +18,7 @@ package org.apache.pdfbox.examples.signature;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.URISyntaxException;
 import java.security.GeneralSecurityException;
 import java.security.KeyStore;
 import java.security.KeyStoreException;
@@ -142,14 +143,14 @@ public abstract class CreateSignatureBase implements SignatureInterface
             gen.addCertificates(new JcaCertStore(Arrays.asList(certificateChain)));
             CMSProcessableInputStream msg = new CMSProcessableInputStream(content);
             CMSSignedData signedData = gen.generate(msg, false);
-            if (tsaUrl != null && tsaUrl.length() > 0)
+            if (tsaUrl != null && !tsaUrl.isEmpty())
             {
                 ValidationTimeStamp validation = new ValidationTimeStamp(tsaUrl);
                 signedData = validation.addSignedTimeStamp(signedData);
             }
             return signedData.getEncoded();
         }
-        catch (GeneralSecurityException | CMSException | OperatorCreationException e)
+        catch (GeneralSecurityException | CMSException | OperatorCreationException | URISyntaxException e)
         {
             throw new IOException(e);
         }

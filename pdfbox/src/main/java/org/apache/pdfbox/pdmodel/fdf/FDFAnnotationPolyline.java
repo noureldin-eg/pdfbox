@@ -23,8 +23,8 @@ import javax.xml.xpath.XPath;
 import javax.xml.xpath.XPathExpressionException;
 import javax.xml.xpath.XPathFactory;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
 import org.apache.pdfbox.cos.COSArray;
 import org.apache.pdfbox.cos.COSDictionary;
 import org.apache.pdfbox.cos.COSName;
@@ -39,7 +39,7 @@ import org.w3c.dom.Element;
  */
 public class FDFAnnotationPolyline extends FDFAnnotation
 {
-    private static final Log LOG = LogFactory.getLog(FDFAnnotationPolyline.class);
+    private static final Logger LOG = LogManager.getLogger(FDFAnnotationPolyline.class);
     /**
      * COS Model value for SubType entry.
      */
@@ -132,9 +132,7 @@ public class FDFAnnotationPolyline extends FDFAnnotation
      */
     public void setVertices(float[] vertices)
     {
-        COSArray newVertices = new COSArray();
-        newVertices.setFloatArray(vertices);
-        annot.setItem(COSName.VERTICES, newVertices);
+        annot.setItem(COSName.VERTICES, COSArray.of(vertices));
     }
 
     /**
@@ -224,9 +222,7 @@ public class FDFAnnotationPolyline extends FDFAnnotation
         COSArray array = null;
         if (color != null)
         {
-            float[] colors = color.getRGBColorComponents(null);
-            array = new COSArray();
-            array.setFloatArray(colors);
+            array = COSArray.of(color.getRGBColorComponents(null));
         }
         annot.setItem(COSName.IC, array);
     }

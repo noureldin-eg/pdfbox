@@ -17,6 +17,7 @@
 package org.apache.pdfbox.debugger.pagepane;
 
 import java.awt.Graphics2D;
+
 import org.apache.pdfbox.cos.COSDictionary;
 import org.apache.pdfbox.debugger.PDFDebugger;
 import org.apache.pdfbox.debugger.ui.ImageUtil;
@@ -39,11 +40,11 @@ import javax.swing.event.AncestorListener;
 import java.awt.Component;
 import java.awt.Cursor;
 import java.awt.Desktop;
-import java.awt.DisplayMode;
+import java.awt.Dimension;
 import java.awt.Font;
-import java.awt.GraphicsDevice;
 import java.awt.GraphicsEnvironment;
 import java.awt.Point;
+import java.awt.Toolkit;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.awt.event.MouseEvent;
@@ -61,8 +62,8 @@ import java.util.Map.Entry;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
 import org.apache.pdfbox.debugger.ui.ErrorDialog;
 import org.apache.pdfbox.debugger.ui.HighResolutionImageIcon;
 import org.apache.pdfbox.debugger.ui.ImageTypeMenu;
@@ -92,7 +93,7 @@ import org.apache.pdfbox.text.PDFTextStripper;
  */
 public class PagePane implements ActionListener, AncestorListener, MouseMotionListener, MouseListener
 {
-    private static final Log LOG = LogFactory.getLog(PagePane.class);
+    private static final Logger LOG = LogManager.getLogger(PagePane.class);
     private final PDDocument document;
     private final JLabel statuslabel;
     private final PDPage page;
@@ -155,20 +156,27 @@ public class PagePane implements ActionListener, AncestorListener, MouseMotionLi
             rectMap.put(linkAnnotation.getRectangle(), "URI: " + uriAction.getURI());
             return;
         }
-        PDDestination destination;
-        if (action instanceof PDActionGoTo)
+        PDDestination destination = null;
+        try
         {
-            PDActionGoTo goToAction = (PDActionGoTo) action;
-            destination = goToAction.getDestination();
+            if (action instanceof PDActionGoTo)
+            {
+                PDActionGoTo goToAction = (PDActionGoTo) action;
+                destination = goToAction.getDestination();
+            }
+            else
+            {
+                destination = linkAnnotation.getDestination();
+            }
+            if (destination instanceof PDNamedDestination)
+            {
+                destination = document.getDocumentCatalog().
+                        findNamedDestinationPage((PDNamedDestination) destination);
+            }
         }
-        else
+        catch (IOException ex)
         {
-            destination = linkAnnotation.getDestination();
-        }
-        if (destination instanceof PDNamedDestination)
-        {
-            destination = document.getDocumentCatalog().
-                    findNamedDestinationPage((PDNamedDestination) destination);
+            LOG.error(ex.getMessage(), ex);
         }
         if (destination instanceof PDPageDestination)
         {
@@ -277,10 +285,9 @@ public class PagePane implements ActionListener, AncestorListener, MouseMotionLi
 
     private void startExtracting()
     {
-        GraphicsDevice gd = GraphicsEnvironment.getLocalGraphicsEnvironment().getDefaultScreenDevice();
-        DisplayMode dm = gd.getDisplayMode();
-        int screenWidth = dm.getWidth();
-        int screenHeight = dm.getHeight();
+        Dimension screenSize = Toolkit.getDefaultToolkit().getScreenSize();
+        int screenWidth = (int) screenSize.getWidth();
+        int screenHeight = (int) screenSize.getHeight();
 
         TextDialog textDialog = TextDialog.instance();
         textDialog.setSize(screenWidth / 3, screenHeight / 3);
@@ -290,6 +297,8 @@ public class PagePane implements ActionListener, AncestorListener, MouseMotionLi
         Point locationOnScreen = getPanel().getLocationOnScreen();
         int x = Math.min(locationOnScreen.x + getPanel().getWidth() / 2, screenWidth * 3 / 4);
         int y = Math.min(locationOnScreen.y + getPanel().getHeight() / 2, screenHeight * 3 / 4);
+        x = Math.max(0, x);
+        y = Math.max(0, y);
         textDialog.setLocation(x, y);
 
         try
@@ -531,8 +540,8 @@ public class PagePane implements ActionListener, AncestorListener, MouseMotionLi
             BufferedImage image = renderer.renderImage(pageIndex, scale, ImageTypeMenu.getImageType(), RenderDestinationMenu.getRenderDestination());
             long t1 = System.nanoTime();
 
-            long ms = TimeUnit.MILLISECONDS.convert(t1 - t0, TimeUnit.NANOSECONDS);
-            labelText = "Rendered in " + ms + " ms";
+            float s = TimeUnit.MILLISECONDS.convert(t1 - t0, TimeUnit.NANOSECONDS) / 1000f;
+            labelText = "Rendered in " + s + " second" + (s > 1 ? "s" : "");
             statuslabel.setText(labelText);
 
             // debug overlays

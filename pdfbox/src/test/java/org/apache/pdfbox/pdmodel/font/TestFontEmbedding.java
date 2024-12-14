@@ -45,6 +45,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.parallel.Execution;
@@ -63,6 +64,8 @@ import static org.mockito.BDDMockito.given;
 class TestFontEmbedding
 {
     private static final File OUT_DIR = new File("target/test-output");
+    private static final File IN_DIR = new File("src/test/resources/org/apache/pdfbox/ttf");
+ 
 
     @BeforeAll
     static void setUp()
@@ -231,8 +234,103 @@ class TestFontEmbedding
             document.save(pdf);
         }
 
-        File IN_DIR = new File("src/test/resources/org/apache/pdfbox/ttf");
- 
+        // compare rendering
+        if (!TestPDFToImage.doTestFile(pdf, IN_DIR.getAbsolutePath(), OUT_DIR.getAbsolutePath()))
+        {
+            // don't fail, rendering is different on different systems, result must be viewed manually
+            System.err.println("Rendering of " + pdf + " failed or is not identical to expected rendering in " + IN_DIR + " directory");
+        }
+
+        // Check text extraction
+        String extracted = getUnicodeText(pdf);
+        //assertEquals(expectedExtractedtext, extracted.replaceAll("\r", "").trim());
+    }
+
+    @Test
+    void testDevanagari() throws IOException
+    {
+        String DEVANAGARI_TEXT_0 = "प्रदेश ग्रामीण व्यवसायिक, लक्ष्मिपति, लक्षित, मक्खि उपलब्धि, प्रसिद्धि";
+        String DEVANAGARI_TEXT_1 = "क्षत्रिय ज्ञानी का शृंगार";
+        String DEVANAGARI_TEXT_2 = "खुर्रम खर्चें ट्रक उद्गम लक्ष्मिपति ग्रह शृंगार हृदय लाड़ु विट्ठल टट्टू बुद्धू ढर्रा भ़ुर्ता कम्प्युटर";
+        String DEVANAGARI_TEXT_3 = "लक्ष्मिपति रविवार को कम्प्यूटर पर कविता साँईं का नाम लेकर पढ़ता है";
+
+        String expectedExtractedtext = DEVANAGARI_TEXT_0 + "\n" + DEVANAGARI_TEXT_1 + "\n" + 
+                DEVANAGARI_TEXT_2 + "\n" + DEVANAGARI_TEXT_3;
+        File pdf = new File(OUT_DIR, "Devanagari.pdf");
+
+        try (PDDocument document = new PDDocument())
+        {
+            PDPage page = new PDPage(PDRectangle.A4);
+            document.addPage(page);
+            PDFont font = PDType0Font.load(document, 
+                    this.getClass().getResourceAsStream("/org/apache/pdfbox/ttf/Lohit-Devanagari.ttf"));
+
+            try (PDPageContentStream contentStream = new PDPageContentStream(document, page))
+            {
+                contentStream.beginText();
+                contentStream.setFont(font, 18);
+                contentStream.newLineAtOffset(10, 750);
+                contentStream.showText(DEVANAGARI_TEXT_0);
+                contentStream.newLineAtOffset(0, -30);
+                contentStream.showText(DEVANAGARI_TEXT_1);
+                contentStream.newLineAtOffset(0, -30);
+                contentStream.showText(DEVANAGARI_TEXT_2);
+                contentStream.newLineAtOffset(0, -30);
+                contentStream.showText(DEVANAGARI_TEXT_3);
+                contentStream.endText();
+            }
+
+            document.save(pdf);
+        }
+
+        // compare rendering
+        if (!TestPDFToImage.doTestFile(pdf, IN_DIR.getAbsolutePath(), OUT_DIR.getAbsolutePath()))
+        {
+            // don't fail, rendering is different on different systems, result must be viewed manually
+            System.err.println("Rendering of " + pdf + " failed or is not identical to expected rendering in " + IN_DIR + " directory");
+        }
+
+        // Check text extraction
+        String extracted = getUnicodeText(pdf);
+        //assertEquals(expectedExtractedtext, extracted.replaceAll("\r", "").trim());
+    }
+
+    @Test
+    void testGujarati() throws IOException
+    {
+        String GUJARATI_TEXT_0 = "દરેક વ્યક્તિને શિક્ષણનો અધિકાર છે";
+        String GUJARATI_TEXT_1 = "શિક્ષિત માણસ વિવિધ પ્રકારના કાર્ય પરિલક્ષિત કરી શકે";
+        String GUJARATI_TEXT_2 = "ટ્રક ગૃહ પ્રસિદ્ધિ શ્રમિક અગ્નિ ઠક્કર ઉત્પલ કર્યે";
+        String GUJARATI_TEXT_3 = "જ્ઞાની બુદ્ધિમાન ક્રમ ગ્રામ કુર્સી ટ્રુ";
+
+        String expectedExtractedtext = GUJARATI_TEXT_0 + "\n" + GUJARATI_TEXT_1 + "\n" + GUJARATI_TEXT_2 + "\n" + GUJARATI_TEXT_3;
+        File pdf = new File(OUT_DIR, "Gujarati.pdf");
+
+        try (PDDocument document = new PDDocument())
+        {
+            PDPage page = new PDPage(PDRectangle.A4);
+            document.addPage(page);
+            PDFont font = PDType0Font.load(document, 
+                    this.getClass().getResourceAsStream("/org/apache/pdfbox/ttf/Lohit-Gujarati.ttf"));
+
+            try (PDPageContentStream contentStream = new PDPageContentStream(document, page))
+            {
+                contentStream.beginText();
+                contentStream.setFont(font, 25);
+                contentStream.newLineAtOffset(10, 750);
+                contentStream.showText(GUJARATI_TEXT_0);
+                contentStream.newLineAtOffset(0, -30);
+                contentStream.showText(GUJARATI_TEXT_1);
+                contentStream.newLineAtOffset(0, -30);
+                contentStream.showText(GUJARATI_TEXT_2);
+                contentStream.newLineAtOffset(0, -30);
+                contentStream.showText(GUJARATI_TEXT_3);
+                contentStream.endText();
+            }
+
+            document.save(pdf);
+        }
+
         // compare rendering
         if (!TestPDFToImage.doTestFile(pdf, IN_DIR.getAbsolutePath(), OUT_DIR.getAbsolutePath()))
         {
@@ -490,5 +588,108 @@ class TestFontEmbedding
         assertTrue(embeddingIsPermitted);
 
         // no test for 1111
+    }
+
+    /**
+     * PDFBOX-5812: Atka Mackerel in Japanese kanji. (surrogate pair)
+     */
+    @Test
+    void testSurrogatePairCharacter() throws IOException
+    {
+        final String message = "𩸽\uD867\uDE3D";
+        File pdf = new File(OUT_DIR, "PDFBOX-5812.pdf");
+
+        ByteArrayOutputStream baos;
+        try (PDDocument doc = new PDDocument())
+        {
+            PDPage page = new PDPage();
+            doc.addPage(page);
+            File ipafont = new File("target/fonts/ipag00303", "ipag.ttf");
+            PDFont font = PDType0Font.load(doc, ipafont);
+            try (PDPageContentStream contents = new PDPageContentStream(doc, page))
+            {
+                contents.beginText();
+                contents.setFont(font, 64);
+                contents.newLineAtOffset(100, 700);
+                contents.showText(message);
+                contents.endText();
+            }
+
+            baos = new ByteArrayOutputStream();
+            doc.save(baos);
+            doc.save(pdf);
+        }
+        try (PDDocument doc = Loader.loadPDF(baos.toByteArray()))
+        {
+            PDFTextStripper stripper = new PDFTextStripper();
+            String text = stripper.getText(doc).trim();
+            assertEquals(message, text);
+        }
+        
+        // compare rendering
+        if (!TestPDFToImage.doTestFile(pdf, IN_DIR.getAbsolutePath(), OUT_DIR.getAbsolutePath()))
+        {
+            // don't fail, rendering is different on different systems, result must be viewed manually
+            System.err.println("Rendering of " + pdf + " failed or is not identical to expected rendering in " + IN_DIR + " directory");
+        }
+    }
+    
+    @Test
+    void testSurrogatePairCharacterExceptionIsBmpCodePoint() throws IOException
+    {
+        final String message = "あ";
+
+        try (PDDocument doc = new PDDocument())
+        {
+            PDPage page = new PDPage();
+            doc.addPage(page);
+            PDFont font = PDType0Font.load(doc,
+                    this.getClass().getResourceAsStream("/org/apache/pdfbox/resources/ttf/LiberationSans-Regular.ttf"));
+
+            try (PDPageContentStream contents = new PDPageContentStream(doc, page))
+            {
+                contents.beginText();
+                contents.setFont(font, 64);
+                contents.newLineAtOffset(100, 700);
+                contents.showText(message);
+                contents.endText();
+            }
+            catch (IllegalStateException e)
+            {
+                assertEquals("could not find the glyphId for the character: あ", e.getMessage());
+                return;
+            }
+
+            fail();
+        }
+    }
+
+    @Test
+    void testSurrogatePairCharacterExceptionIsValidCodePoint() throws IOException
+    {
+        final String message = "𩸽";
+        try (PDDocument doc = new PDDocument())
+        {
+            PDPage page = new PDPage();
+            doc.addPage(page);
+            PDFont font = PDType0Font.load(doc,
+                    this.getClass().getResourceAsStream("/org/apache/pdfbox/resources/ttf/LiberationSans-Regular.ttf"));
+
+            try (PDPageContentStream contents = new PDPageContentStream(doc, page))
+            {
+                contents.beginText();
+                contents.setFont(font, 64);
+                contents.newLineAtOffset(100, 700);
+                contents.showText(message);
+                contents.endText();
+            }
+            catch (IllegalStateException e)
+            {
+                assertEquals("could not find the glyphId for the character: 𩸽", e.getMessage());
+                return;
+            }
+
+            fail();
+        }
     }
 }

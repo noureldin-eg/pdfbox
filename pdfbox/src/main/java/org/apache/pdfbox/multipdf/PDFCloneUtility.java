@@ -23,15 +23,14 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
 import org.apache.pdfbox.cos.COSArray;
 import org.apache.pdfbox.cos.COSBase;
 import org.apache.pdfbox.cos.COSDictionary;
 import org.apache.pdfbox.cos.COSName;
 import org.apache.pdfbox.cos.COSObject;
 import org.apache.pdfbox.cos.COSStream;
-import org.apache.pdfbox.io.IOUtils;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.common.COSObjectable;
 
@@ -41,7 +40,7 @@ import org.apache.pdfbox.pdmodel.common.COSObjectable;
  */
 public class PDFCloneUtility
 {
-    private static final Log LOG = LogFactory.getLog(PDFCloneUtility.class);
+    private static final Logger LOG = LogManager.getLogger(PDFCloneUtility.class);
 
     private final PDDocument destination;
     private final Map<COSBase, COSBase> clonedVersion = new HashMap<>();
@@ -55,7 +54,7 @@ public class PDFCloneUtility
      * 
      * @param dest the destination PDF document that will receive the clones
      */
-    PDFCloneUtility(PDDocument dest)
+    protected PDFCloneUtility(PDDocument dest)
     {
         this.destination = dest;
     }
@@ -103,7 +102,7 @@ public class PDFCloneUtility
         return (TCOSBase) retval;
     }
 
-    COSBase cloneCOSBaseForNewDocument(COSBase base) throws IOException
+    private COSBase cloneCOSBaseForNewDocument(COSBase base) throws IOException
     {
         if (base instanceof COSObject)
         {
@@ -148,7 +147,7 @@ public class PDFCloneUtility
         try (OutputStream output = newStream.createRawOutputStream();
                 InputStream input = stream.createRawInputStream())
         {
-            IOUtils.copy(input, output);
+            input.transferTo(output);
         }
         clonedVersion.put(stream, newStream);
         for (Map.Entry<COSName, COSBase> entry : stream.entrySet())
@@ -250,8 +249,8 @@ public class PDFCloneUtility
             if (actual == parent)
             {
                 COSObject cosObj = ((COSObject) value);
-                LOG.warn(parent.getClass().getSimpleName() + " object has a reference to itself: "
-                        + cosObj.getObjectNumber() + " " + cosObj.getGenerationNumber() + " R");
+                LOG.warn("{} object has a reference to itself: {}",
+                        parent.getClass().getSimpleName(), cosObj.getKey());
                 return true;
             }
         }

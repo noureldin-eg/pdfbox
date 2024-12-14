@@ -29,8 +29,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.PriorityQueue;
 import java.util.Set;
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
 import org.apache.fontbox.FontBoxFont;
 import org.apache.fontbox.ttf.OpenTypeFont;
 import org.apache.fontbox.ttf.TTFParser;
@@ -46,7 +46,7 @@ import org.apache.pdfbox.pdmodel.font.Standard14Fonts.FontName;
  */
 final class FontMapperImpl implements FontMapper
 {
-    private static final Log LOG = LogFactory.getLog(FontMapperImpl.class);
+    private static final Logger LOG = LogManager.getLogger(FontMapperImpl.class);
 
     private static final FontCache fontCache = new FontCache(); // todo: static cache isn't ideal
     private FontProvider fontProvider;
@@ -220,15 +220,9 @@ final class FontMapperImpl implements FontMapper
      */
     private List<String> getSubstitutes(String postScriptName)
     {
-        List<String> subs = substitutes.get(postScriptName.replace(" ", "").toLowerCase(Locale.ENGLISH));
-        if (subs != null)
-        {
-            return subs;
-        }
-        else
-        {
-            return Collections.emptyList();
-        }
+        return substitutes.getOrDefault(
+                postScriptName.replace(" ", "").toLowerCase(Locale.ENGLISH), 
+                Collections.emptyList());
     }
 
     /**
@@ -447,6 +441,18 @@ final class FontMapperImpl implements FontMapper
             return info.getFont();
         }
 
+        if (postScriptName.contains(","))
+        {
+            postScriptName = postScriptName.substring(0, postScriptName.indexOf(","));
+            // PDFBOX-5806: try cutting font style and getting the basefont
+            // eg. for "Wingdings,Bolt" to "Wingding-Regular" (including the following step)
+            info = getFont(format, postScriptName);
+            if (info != null)
+            {
+                return info.getFont();
+            }
+        }
+
         // try appending "-Regular", works for Wingdings on windows
         info = getFont(format, postScriptName + "-Regular");
         if (info != null)
@@ -472,10 +478,7 @@ final class FontMapperImpl implements FontMapper
         FontInfo info = fontInfoByName.get(postScriptName.toLowerCase(Locale.ENGLISH));
         if (info != null && info.getFormat() == format)
         {
-            if (LOG.isDebugEnabled())
-            {
-                LOG.debug(String.format("getFont('%s','%s') returns %s", format, postScriptName, info));
-            }
+            LOG.debug(String.format("getFont('%s','%s') returns %s", format, postScriptName, info));
             return info;
         }
         return null;
@@ -522,10 +525,7 @@ final class FontMapperImpl implements FontMapper
                 FontMatch bestMatch = queue.poll();
                 if (bestMatch != null)
                 {
-                    if (LOG.isDebugEnabled())
-                    {
-                        LOG.debug("Best match for '" + baseFont + "': " + bestMatch.info);
-                    }
+                    LOG.debug("Best match for '{}': {}", baseFont, bestMatch.info);
                     FontBoxFont font = bestMatch.info.getFont();
                     if (font instanceof OpenTypeFont)
                     {

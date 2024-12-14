@@ -29,8 +29,11 @@ import java.nio.charset.StandardCharsets;
  */
 public class COSFloat extends COSNumber
 {
-    private Float value;
+    private final float value;
     private String valueAsString;
+
+    public static final COSFloat ZERO = new COSFloat(0f, "0.0");
+    public static final COSFloat ONE = new COSFloat(1f, "1.0");
 
     /**
      * Constructor.
@@ -43,6 +46,18 @@ public class COSFloat extends COSNumber
     }
 
     /**
+     * An internal constructor to avoid formatting for the predefined constants.
+     *
+     * @param aFloat
+     * @param valueString
+     */
+    private COSFloat(float aFloat, String valueString)
+    {
+        value = aFloat;
+        valueAsString = valueString;
+    }
+
+    /**
      * Constructor.
      *
      * @param aFloat The primitive float object that this object wraps.
@@ -51,10 +66,13 @@ public class COSFloat extends COSNumber
      */
     public COSFloat( String aFloat ) throws IOException
     {
+        float parsedValue;
+        String stringValue = null;
         try
         {
-            value = Float.parseFloat(aFloat);
-            valueAsString = checkMinMaxValues() ? null : aFloat;
+            float f = Float.parseFloat(aFloat);
+            parsedValue = coerce(f);
+            stringValue = f == parsedValue ? aFloat : null;
         }
         catch( NumberFormatException e )
         {
@@ -70,6 +88,11 @@ public class COSFloat extends COSNumber
                 // PDFBOX-3500 has 0.-262
                 aFloat = "-" + aFloat.replaceFirst("-", "");
             }
+            else if (aFloat.matches("^-\\d+\\.-\\d+"))
+            {
+                // PDFBOX-5829 has -12.-1
+                aFloat = "-" + aFloat.replace("-", "");
+            }
             else
             {
                 throw new IOException("Error expected floating point number actual='" + aFloat + "'", e);
@@ -77,66 +100,42 @@ public class COSFloat extends COSNumber
 
             try
             {
-                value = Float.parseFloat(aFloat);
-                checkMinMaxValues();
+                parsedValue = coerce(Float.parseFloat(aFloat));
             }
             catch (NumberFormatException e2)
             {
                 throw new IOException("Error expected floating point number actual='" + aFloat + "'", e2);
             }
         }
-
+        value = parsedValue;
+        valueAsString = stringValue;
     }
 
     /**
-     * Check and coerce the value field to be between MIN_NORMAL and MAX_VALUE. Returns "true" if the value was
-     * replaced.
+     * Check and coerce the value field to be between MIN_NORMAL and MAX_VALUE.
      * 
-     * @return true if the value was replaced
+     * @param floatValue the value to be checked
+     * @return the coerced value
      */
-    private boolean checkMinMaxValues()
+    private float coerce(float floatValue)
     {
-        if (value == Float.POSITIVE_INFINITY)
+        if (floatValue == Float.POSITIVE_INFINITY)
         {
-            value = Float.MAX_VALUE;
+            return Float.MAX_VALUE;
         }
-        else if (value == Float.NEGATIVE_INFINITY)
+        if (floatValue == Float.NEGATIVE_INFINITY)
         {
-            value = -Float.MAX_VALUE;
+            return -Float.MAX_VALUE;
         }
-        else if (Math.abs(value) < Float.MIN_NORMAL)
+        if (Math.abs(floatValue) < Float.MIN_NORMAL)
         {
             // values smaller than the smallest possible float value are converted to 0
             // see PDF spec, chapter 2 of Appendix C Implementation Limits
-            value = 0f;
+            return 0f;
         }
-        else
-        {
-            return false;
-        }
-        return true;
+        return floatValue;
     }
     
-    /**
-     * If the string represents a floating point number, this will remove all trailing zeros
-     * 
-     * @param plainStringValue a decimal number
-     */
-    private String trimZeros(String plainStringValue)
-    {
-        int lastIndex = plainStringValue.lastIndexOf('.');
-        if (lastIndex > 0)
-        {
-            int i = plainStringValue.length() - 1;
-            while (i > lastIndex + 1 && plainStringValue.charAt(i) == '0')
-            {
-                i--;
-            }
-            return plainStringValue.substring(0, i + 1);
-        }
-        return plainStringValue;
-    }
-
     /**
      * The value of the float object that this one wraps.
      *
@@ -156,7 +155,7 @@ public class COSFloat extends COSNumber
     @Override
     public long longValue()
     {
-        return value.longValue();
+        return (long) value;
     }
 
     /**
@@ -167,7 +166,7 @@ public class COSFloat extends COSNumber
     @Override
     public int intValue()
     {
-        return value.intValue();
+        return (int) value;
     }
 
     /**
@@ -186,7 +185,7 @@ public class COSFloat extends COSNumber
     @Override
     public int hashCode()
     {
-        return value.hashCode();
+        return Float.hashCode(value);
     }
 
     /**
@@ -206,7 +205,10 @@ public class COSFloat extends COSNumber
     {
         if (valueAsString == null)
         {
-            valueAsString = trimZeros(new BigDecimal(String.valueOf(value)).toPlainString());
+            String s = String.valueOf(value);
+            boolean simpleFormat = s.indexOf('E') < 0;
+            valueAsString = simpleFormat ? s
+                    : new BigDecimal(s).stripTrailingZeros().toPlainString();
         }
         return valueAsString;
     }

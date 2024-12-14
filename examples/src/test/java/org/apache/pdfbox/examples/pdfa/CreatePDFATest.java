@@ -33,14 +33,17 @@ import org.apache.pdfbox.examples.signature.CreateSignature;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDDocumentCatalog;
 import org.apache.pdfbox.pdmodel.common.PDMetadata;
-import org.apache.pdfbox.preflight.ValidationResult;
-import org.apache.pdfbox.preflight.ValidationResult.ValidationError;
-import org.apache.pdfbox.preflight.parser.PreflightParser;
 import org.apache.xmpbox.XMPMetadata;
 import org.apache.xmpbox.schema.DublinCoreSchema;
 import org.apache.xmpbox.xml.DomXmpParser;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.verapdf.gf.foundry.VeraGreenfieldFoundryProvider;
+import org.verapdf.pdfa.Foundries;
+import org.verapdf.pdfa.PDFAParser;
+import org.verapdf.pdfa.PDFAValidator;
+import org.verapdf.pdfa.flavours.PDFAFlavour;
+import org.verapdf.pdfa.results.ValidationResult;
 
 /**
  *
@@ -51,7 +54,7 @@ class CreatePDFATest
     private final String outDir = "target/test-output";
 
     @BeforeEach
-    protected void setUp() throws Exception
+    protected void setUp()
     {
         new File(outDir).mkdirs();
     }
@@ -76,14 +79,6 @@ class CreatePDFATest
         keystore.load(new FileInputStream(keystorePath), "123456".toCharArray());
         CreateSignature signing = new CreateSignature(keystore, "123456".toCharArray());
         signing.signDetached(new File(pdfaFilename), new File(signedPdfaFilename));
-
-        // Verify that it is PDF/A-1b
-        ValidationResult result = PreflightParser.validate(new File(signedPdfaFilename));
-        for (ValidationError ve : result.getErrorsList())
-        {
-            System.err.println(ve.getErrorCode() + ": " + ve.getDetails());
-        }
-        assertTrue(result.isValid(), "PDF file created with CreatePDFA is not valid PDF/A-1b");
 
         // check the XMP metadata
         try (PDDocument document = Loader.loadPDF(new File(pdfaFilename)))
@@ -115,7 +110,7 @@ class CreatePDFATest
             {
                 continue;
             }
-            if (line.matches("^\\d+ 0 obj$"))
+            if (line.matches("\\d+ 0 obj"))
             {
                 int pos = line.indexOf(" 0 obj");
                 line = line.substring(0, pos);
@@ -126,5 +121,14 @@ class CreatePDFATest
         }
         br.close();
 
+        // https://docs.verapdf.org/develop/
+        VeraGreenfieldFoundryProvider.initialise();
+        PDFAFlavour flavour = PDFAFlavour.fromString("1b");
+        try (PDFAParser parser = Foundries.defaultInstance().createParser(signedFile, flavour))
+        {
+            PDFAValidator validator = Foundries.defaultInstance().createValidator(flavour, false);
+            ValidationResult veraResult = validator.validate(parser);
+            assertTrue(veraResult.isCompliant());
+        }
     }
 }

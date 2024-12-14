@@ -21,8 +21,8 @@ import java.io.IOException;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
 import org.apache.fontbox.FontBoxFont;
 import org.apache.pdfbox.cos.COSBase;
 import org.apache.pdfbox.cos.COSDictionary;
@@ -35,6 +35,7 @@ import org.apache.pdfbox.pdmodel.font.encoding.GlyphList;
 import org.apache.pdfbox.pdmodel.font.encoding.MacRomanEncoding;
 import org.apache.pdfbox.pdmodel.font.encoding.StandardEncoding;
 import org.apache.pdfbox.pdmodel.font.encoding.WinAnsiEncoding;
+import org.apache.pdfbox.pdmodel.font.encoding.ZapfDingbatsEncoding;
 
 /**
  * A simple font. Simple fonts use a PostScript encoding vector.
@@ -43,7 +44,7 @@ import org.apache.pdfbox.pdmodel.font.encoding.WinAnsiEncoding;
  */
 public abstract class PDSimpleFont extends PDFont
 {
-    private static final Log LOG = LogFactory.getLog(PDSimpleFont.class);
+    private static final Logger LOG = LogManager.getLogger(PDSimpleFont.class);
 
     protected Encoding encoding;
     protected GlyphList glyphList;
@@ -88,11 +89,21 @@ public abstract class PDSimpleFont extends PDFont
         if (encodingBase instanceof COSName)
         {
             COSName encodingName = (COSName) encodingBase;
-            this.encoding = Encoding.getInstance(encodingName);
-            if (this.encoding == null)
+            if (FontName.ZAPF_DINGBATS.getName().equals(getName()) && !isEmbedded())
             {
-                LOG.warn("Unknown encoding: " + encodingName.getName());
-                this.encoding = readEncodingFromFont(); // fallback
+                // PDFBOX- and PDF.js issue 16464: ignore other encodings
+                // this segment will work only if readEncoding() is called after the data
+                // for getName() and isEmbedded() is available
+                this.encoding = ZapfDingbatsEncoding.INSTANCE;
+            }
+            else
+            {
+                this.encoding = Encoding.getInstance(encodingName);
+                if (this.encoding == null)
+                {
+                    LOG.warn("Unknown encoding: {}", encodingName.getName());
+                    this.encoding = readEncodingFromFont(); // fallback
+                }
             }
         }
         else if (encodingBase instanceof COSDictionary)
@@ -308,13 +319,11 @@ public abstract class PDSimpleFont extends PDFont
             noUnicode.add(code);
             if (name != null)
             {
-                LOG.warn("No Unicode mapping for " + name + " (" + code + ") in font " +
-                        getName());
+                LOG.warn("No Unicode mapping for {} ({}) in font {}", name, code, getName());
             }
             else
             {
-                LOG.warn("No Unicode mapping for character code " + code + " in font " +
-                        getName());
+                LOG.warn("No Unicode mapping for character code {} in font {}", code, getName());
             }
         }
 
@@ -366,7 +375,7 @@ public abstract class PDSimpleFont extends PDFont
         if (getEncoding() instanceof DictionaryEncoding)
         {
             DictionaryEncoding dictionary = (DictionaryEncoding)getEncoding();
-            if (dictionary.getDifferences().size() > 0)
+            if (!dictionary.getDifferences().isEmpty())
             {
                 // we also require that the differences are actually different, see PDFBOX-1900 with
                 // the file from PDFBOX-2192 on Windows

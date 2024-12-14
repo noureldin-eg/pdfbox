@@ -36,6 +36,10 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.net.InetAddress;
+import java.net.SocketTimeoutException;
+import java.net.URISyntaxException;
+import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.security.GeneralSecurityException;
@@ -51,6 +55,10 @@ import java.security.cert.CertificateFactory;
 import java.security.cert.X509CRL;
 import java.security.cert.X509Certificate;
 import java.text.MessageFormat;
+import java.text.SimpleDateFormat;
+import java.time.Duration;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
 import java.util.Calendar;
 import java.util.Collection;
@@ -58,6 +66,11 @@ import java.util.Date;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+
+import javax.net.ssl.HttpsURLConnection;
+
+import org.apache.commons.net.ntp.NTPUDPClient;
+import org.apache.commons.net.ntp.TimeInfo;
 
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.cos.COSArray;
@@ -88,7 +101,9 @@ import org.apache.pdfbox.pdmodel.interactive.digitalsignature.PDSignature;
 import org.apache.pdfbox.pdmodel.interactive.form.PDField;
 import org.apache.pdfbox.rendering.PDFRenderer;
 import org.apache.pdfbox.util.Hex;
+
 import org.apache.wink.client.MockHttpServer;
+
 import org.bouncycastle.asn1.BEROctetString;
 import org.bouncycastle.asn1.ocsp.OCSPResponseStatus;
 import org.bouncycastle.cert.X509CertificateHolder;
@@ -167,9 +182,63 @@ class TestCreateSignature
     }
 
     /**
+     * Test whether local machine has the correct time. If not, other tests may fail with "OCSP
+     * answer is too old".
+     */
+    @Test
+    void testTimeDifference() throws IOException
+    {
+        SimpleDateFormat sdf = new SimpleDateFormat("dd.MM.yyyy HH:mm:ss");
+
+        Date localTime = new Date();
+
+        // https://stackoverflow.com/questions/4442192/
+        NTPUDPClient timeClient = new NTPUDPClient();
+        InetAddress inetAddress = InetAddress.getByName("time.nist.gov");
+        timeClient.setDefaultTimeout(Duration.ofMillis(5000));
+        TimeInfo timeInfo;
+        long returnTime;
+        try
+        {
+            timeInfo = timeClient.getTime(inetAddress);
+            returnTime = timeInfo.getReturnTime();
+        }
+        catch (SocketTimeoutException ex)
+        {
+            // Won't work behind a proxy. Nor on our CI :-(
+            System.out.println("Socket timeout when trying to get time from NTP server; trying google");
+
+            String dateString;
+            try
+            {
+                HttpsURLConnection con = (HttpsURLConnection) new URL("https://www.google.com/").openConnection();
+                if (con.getResponseCode() != HttpsURLConnection.HTTP_OK)
+                {
+                    System.out.println("Google returns " + con.getResponseCode());
+                    return;
+                }
+                dateString = con.getHeaderField("Date");
+                con.disconnect();
+            }
+            catch (IOException ioex)
+            {
+                System.out.println("failed to access google: " + ioex.getMessage());
+                return;
+            }
+            ZonedDateTime zdt = DateTimeFormatter.RFC_1123_DATE_TIME.parse(dateString, ZonedDateTime::from);
+            returnTime = Date.from(zdt.toInstant()).getTime();
+        }
+        System.out.println("Remote time: " + sdf.format(new Date(returnTime)));
+        System.out.println("Local  time: " + sdf.format(localTime));
+        long diff = Math.abs(localTime.getTime() - returnTime) / 1000;
+        assertTrue(diff < 15, "Local time is off by more than " + diff + " seconds");
+    }
+
+    /**
      * Signs a PDF using the "adbe.pkcs7.detached" SubFilter with the SHA-256 digest.
      *
      * @throws IOException
+     * @throws URISyntaxException
      * @throws GeneralSecurityException
      * @throws CMSException
      * @throws OperatorCreationException
@@ -177,10 +246,10 @@ class TestCreateSignature
      * @throws CertificateVerificationException
      */
     @ParameterizedTest
-	@MethodSource("signingTypes")
+    @MethodSource("signingTypes")
     void testDetachedSHA256(boolean externallySign)
             throws IOException, CMSException, OperatorCreationException, GeneralSecurityException,
-                   TSPException, CertificateVerificationException
+                   TSPException, CertificateVerificationException, URISyntaxException
     {
         // sign PDF
         CreateSignature signing = new CreateSignature(keyStore, PASSWORD.toCharArray());
@@ -217,7 +286,7 @@ class TestCreateSignature
      * @throws CertificateVerificationException
      */
     @ParameterizedTest
-	@MethodSource("signingTypes")
+    @MethodSource("signingTypes")
     void testDetachedSHA256WithTSA(boolean externallySign)
             throws IOException, CMSException, OperatorCreationException, GeneralSecurityException,
                    TSPException, CertificateVerificationException
@@ -329,7 +398,7 @@ class TestCreateSignature
      * @throws CertificateVerificationException
      */
     @ParameterizedTest
-	@MethodSource("signingTypes")
+    @MethodSource("signingTypes")
     void testCreateVisibleSignature(boolean externallySign)
             throws IOException, CMSException, OperatorCreationException, GeneralSecurityException,
                    TSPException, CertificateVerificationException
@@ -361,7 +430,7 @@ class TestCreateSignature
      * @throws CertificateVerificationException
      */
     @ParameterizedTest
-	@MethodSource("signingTypes")
+    @MethodSource("signingTypes")
     void testCreateVisibleSignature2(boolean externallySign)
             throws IOException, CMSException, OperatorCreationException, GeneralSecurityException,
                    TSPException, CertificateVerificationException
@@ -531,7 +600,7 @@ class TestCreateSignature
                 // verify that all getContents() methods returns the same content
                 try (FileInputStream fis = new FileInputStream(signedFile))
                 {
-                    byte[] contents2 = sig.getContents(IOUtils.toByteArray(fis));
+                    byte[] contents2 = sig.getContents(((InputStream) fis).readAllBytes());
                     assertArrayEquals(contents, contents2);
                 }
                 byte[] contents3 = sig.getContents(new FileInputStream(signedFile));
@@ -591,7 +660,7 @@ class TestCreateSignature
     private String calculateDigestString(InputStream inputStream) throws NoSuchAlgorithmException, IOException
     {
         MessageDigest md = MessageDigest.getInstance("SHA-256");
-        return Hex.getString(md.digest(IOUtils.toByteArray(inputStream)));
+        return Hex.getString(md.digest(inputStream.readAllBytes()));
     }
 
     /**
@@ -646,7 +715,7 @@ class TestCreateSignature
      * @throws Exception
      */
     @ParameterizedTest
-	@MethodSource("signingTypes")
+    @MethodSource("signingTypes")
     void testSaveIncrementalAfterSign(boolean externallySign) throws Exception
     {
         BufferedImage oldImage, expectedImage1, actualImage1, expectedImage2, actualImage2;
@@ -679,7 +748,7 @@ class TestCreateSignature
 
             expectedImage1 = new PDFRenderer(doc).renderImage(0);
 
-            // compare images, image must has changed
+            // compare images, image must have changed
             assertEquals(oldImage.getWidth(), expectedImage1.getWidth());
             assertEquals(oldImage.getHeight(), expectedImage1.getHeight());
             assertEquals(oldImage.getType(), expectedImage1.getType());
@@ -719,7 +788,7 @@ class TestCreateSignature
             field.setValue("New Value 2");
             expectedImage2 = new PDFRenderer(doc).renderImage(0);
 
-            // compare images, image must has changed
+            // compare images, image must have changed
             assertEquals(oldImage.getWidth(), expectedImage2.getWidth());
             assertEquals(oldImage.getHeight(), expectedImage2.getHeight());
             assertEquals(oldImage.getType(), expectedImage2.getType());
@@ -885,7 +954,7 @@ class TestCreateSignature
                 COSStream certStream = (COSStream) sigCertArray.getObject(i);
                 try (InputStream is = certStream.createInputStream())
                 {
-                    sigCertHolderSetFromVRIArray.add(new X509CertificateHolder(IOUtils.toByteArray(is)));
+                    sigCertHolderSetFromVRIArray.add(new X509CertificateHolder(is.readAllBytes()));
                 }
             }
             for (X509CertificateHolder holder : certificateHolderSet)
@@ -973,7 +1042,7 @@ class TestCreateSignature
                 X509CertificateHolder certHolder2;
                 try (InputStream is2 = certStream.createInputStream())
                 {
-                    certHolder2 = new X509CertificateHolder(IOUtils.toByteArray(is2));
+                    certHolder2 = new X509CertificateHolder(is2.readAllBytes());
                 }
                 
                 assertEquals(certHolder2, new X509CertificateHolder(crlIssuerCert.getEncoded()),
@@ -1014,7 +1083,7 @@ class TestCreateSignature
                 X509CertificateHolder certHolder2;
                 try (InputStream is2 = certStream.createInputStream())
                 {
-                    certHolder2 = new X509CertificateHolder(IOUtils.toByteArray(is2));
+                    certHolder2 = new X509CertificateHolder(is2.readAllBytes());
                 }
 
                 assertEquals(certHolder2, ocspCertHolder, "OCSP certificate is not in the VRI array");
@@ -1053,7 +1122,7 @@ class TestCreateSignature
             doc.setDocumentId(12345l);
             ExternalSigningSupport externalSigning = doc.saveIncrementalForExternalSigning(baos);
             // invoke external signature service
-            return IOUtils.toByteArray(externalSigning.getContent());
+            return externalSigning.getContent().readAllBytes();
         }
         finally
         {

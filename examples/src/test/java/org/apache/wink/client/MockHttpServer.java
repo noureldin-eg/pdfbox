@@ -41,8 +41,6 @@ import javax.net.ssl.SSLServerSocketFactory;
 import javax.ws.rs.core.Response;
 import javax.ws.rs.core.Response.Status;
 
-import org.apache.pdfbox.io.IOUtils;
-
 /**
  * Copied from
  * http://svn.apache.org/repos/asf/wink/trunk/wink-component-test-support/src/main/java/org/apache/wink/client/MockHttpServer.java
@@ -296,7 +294,7 @@ public class MockHttpServer extends Thread {
             while ((line = readLine(is)) != null) {
                 String lineStr = new String(line);
                 // if there are no more headers
-                if ("".equals(lineStr.trim())) {
+                if (lineStr.trim().isEmpty()) {
                     break;
                 }
                 addRequestHeader(lineStr);
@@ -335,8 +333,7 @@ public class MockHttpServer extends Thread {
                 return;
             }
             int contentLen = Integer.parseInt(contentLength);
-            byte[] bytes = new byte[contentLen];
-            IOUtils.populateBuffer(is, bytes);
+            byte[] bytes = is.readNBytes(contentLen);
             requestContent.write(bytes);
         }
 
@@ -420,11 +417,7 @@ public class MockHttpServer extends Thread {
 
         private void addRequestHeader(String line) {
             String[] parts = line.split(": ");
-            List<String> values = requestHeaders.get(parts[0]);
-            if (values == null) {
-                values = new ArrayList<>();
-                requestHeaders.put(parts[0], values);
-            }
+            List<String> values = requestHeaders.computeIfAbsent(parts[0], k -> new ArrayList<>());
             values.add(parts[1]);
         }
 

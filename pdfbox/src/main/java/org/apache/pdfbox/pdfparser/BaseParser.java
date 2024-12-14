@@ -18,15 +18,20 @@ package org.apache.pdfbox.pdfparser;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+
 import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.Charset;
 import java.nio.charset.CharsetDecoder;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
-import java.util.Optional;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import java.util.HashMap;
+import java.util.Map;
+
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
+
 import org.apache.pdfbox.cos.COSArray;
 import org.apache.pdfbox.cos.COSBase;
 import org.apache.pdfbox.cos.COSBoolean;
@@ -42,25 +47,48 @@ import org.apache.pdfbox.cos.COSString;
 import org.apache.pdfbox.io.RandomAccessRead;
 
 /**
- * This class is used to contain parsing logic that will be used by both the
- * PDFParser and the COSStreamParser.
+ * This class is used to contain parsing logic that will be used by all parsers.
  *
  * @author Ben Litchfield
  */
 public abstract class BaseParser
 {
+    /**
+     * Log instance.
+     */
+    private static final Logger LOG = LogManager.getLogger(BaseParser.class);
+
     private static final long OBJECT_NUMBER_THRESHOLD = 10000000000L;
 
     private static final long GENERATION_NUMBER_THRESHOLD = 65535;
 
-    static final int MAX_LENGTH_LONG = Long.toString(Long.MAX_VALUE).length();
+    private static final int MAX_LENGTH_LONG = Long.toString(Long.MAX_VALUE).length();
 
-    private final CharsetDecoder utf8Decoder = StandardCharsets.UTF_8.newDecoder();
+    private static final Charset ALTERNATIVE_CHARSET;
 
-    /**
-     * Log instance.
-     */
-    private static final Log LOG = LogFactory.getLog(BaseParser.class);
+    private final Map<Long, COSObjectKey> keyCache = new HashMap<>();
+
+    static
+    {
+        Charset cs;
+        String charsetName = "Windows-1252";
+        try
+        {
+            cs = Charset.forName(charsetName);
+        }
+        catch (IllegalArgumentException | UnsupportedOperationException e)
+        {
+            cs = StandardCharsets.ISO_8859_1;
+            LOG.warn(() -> "Charset is not supported: " + charsetName + ", falling back to " +
+                    StandardCharsets.ISO_8859_1.name(), e);
+        }
+        ALTERNATIVE_CHARSET = cs;
+    }
+
+    // CharSetDecoders are not threadsafe so not static
+    private final CharsetDecoder utf8Decoder = StandardCharsets.UTF_8.newDecoder()
+            .onMalformedInput(CodingErrorAction.REPORT)
+            .onUnmappableCharacter(CodingErrorAction.REPORT);
 
     protected static final int E = 'e';
     protected static final int N = 'n';
@@ -95,24 +123,36 @@ public abstract class BaseParser
     /**
      * This is a string constant that will be used for comparisons.
      */
-    private static final char[] TRUE = new char[] { 't', 'r', 'u', 'e' };
+    private static final char[] TRUE = { 't', 'r', 'u', 'e' };
     /**
      * This is a string constant that will be used for comparisons.
      */
-    private static final char[] FALSE = new char[] { 'f', 'a', 'l', 's', 'e' };
+    private static final char[] FALSE = { 'f', 'a', 'l', 's', 'e' };
     /**
      * This is a string constant that will be used for comparisons.
      */
-    private static final char[] NULL = new char[] { 'n', 'u', 'l', 'l' };
+    private static final char[] NULL = { 'n', 'u', 'l', 'l' };
 
+    /**
+     * ASCII code for Null.
+     */
+    private static final byte ASCII_NULL = 0;
+    /**
+     * ASCII code for horizontal tab.
+     */
+    private static final byte ASCII_TAB = 9;
     /**
      * ASCII code for line feed.
      */
-    protected static final byte ASCII_LF = 10;
+    private static final byte ASCII_LF = 10;
+    /**
+     * ASCII code for form feed.
+     */
+    private static final byte ASCII_FF = 12;
     /**
      * ASCII code for carriage return.
      */
-    protected static final byte ASCII_CR = 13;
+    private static final byte ASCII_CR = 13;
     private static final byte ASCII_ZERO = 48;
     private static final byte ASCII_NINE = 57;
     private static final byte ASCII_SPACE = 32;
@@ -153,14 +193,23 @@ public abstract class BaseParser
      */
     protected COSObjectKey getObjectKey(long num, int gen)
     {
-        if (document == null || document.getXrefTable() == null)
+        if (document == null || document.getXrefTable().isEmpty())
         {
             return new COSObjectKey(num, gen);
         }
-        Optional<COSObjectKey> foundKey = document.getXrefTable().keySet().stream()
-                .filter(k -> k.getNumber() == num && k.getGeneration() == gen) //
-                .findAny();
-        return foundKey.isPresent() ? foundKey.get() : new COSObjectKey(num, gen);
+        // use a cache to get the COSObjectKey as iterating over the xref-table-map gets slow for big pdfs
+        // in the long run we have to overhaul the object pool or even better remove it
+        Map<COSObjectKey, Long> xrefTable = document.getXrefTable();
+        if (xrefTable.size() > keyCache.size())
+        {
+            for (COSObjectKey key : xrefTable.keySet())
+            {
+                keyCache.putIfAbsent(key.getInternalHash(), key);
+            }
+        }
+        long internalHashCode = COSObjectKey.computeInternalHash(num, gen);
+        COSObjectKey foundKey = keyCache.get(internalHashCode);
+        return foundKey != null ? foundKey : new COSObjectKey(num, gen);
     }
 
     /**
@@ -187,24 +236,24 @@ public abstract class BaseParser
         readExpectedChar('R');
         if (!(value instanceof COSInteger))
         {
-            LOG.error("expected number, actual=" + value + " at offset " + numOffset);
+            LOG.error("expected number, actual={} at offset {}", value, numOffset);
             return COSNull.NULL;
         }
         if (!(generationNumber instanceof COSInteger))
         {
-            LOG.error("expected number, actual=" + generationNumber + " at offset " + genOffset);
+            LOG.error("expected number, actual={} at offset {}", generationNumber, genOffset);
             return COSNull.NULL;
         }
         long objNumber = ((COSInteger) value).longValue();
         if (objNumber <= 0)
         {
-            LOG.warn("invalid object number value =" + objNumber + " at offset " + numOffset);
+            LOG.warn("invalid object number value ={} at offset {}", objNumber, numOffset);
             return COSNull.NULL;
         }
         int genNumber = ((COSInteger) generationNumber).intValue();
         if (genNumber < 0)
         {
-            LOG.error("invalid generation number value =" + genNumber + " at offset " + numOffset);
+            LOG.error("invalid generation number value ={} at offset {}", genNumber, numOffset);
             return COSNull.NULL;
         }
         // dereference the object
@@ -215,8 +264,7 @@ public abstract class BaseParser
     {
         if (document == null)
         {
-            throw new IOException("object reference " + key + " at offset " + source
-                    .getPosition()
+            throw new IOException("object reference " + key + " at offset " + source.getPosition()
                     + " in content stream");
         }
         return document.getObjectFromPool(key);
@@ -257,8 +305,8 @@ public abstract class BaseParser
             else
             {
                 // invalid dictionary, we were expecting a /Name, read until the end or until we can recover
-                LOG.warn("Invalid dictionary, found: '" + c + "' but expected: '/' at offset "
-                        + source.getPosition());
+                LOG.warn("Invalid dictionary, found: '{}' but expected: '/' at offset {}", c,
+                        source.getPosition());
                 if (readUntilEndOfCOSDictionary())
                 {
                     // we couldn't recover
@@ -266,8 +314,16 @@ public abstract class BaseParser
                 }
             }
         }
-        readExpectedChar('>');
-        readExpectedChar('>');
+        try
+        {
+            readExpectedChar('>');
+            readExpectedChar('>');
+        }
+        catch (IOException exception)
+        {
+            LOG.warn("Invalid dictionary, can't find end of dictionary at offset {}",
+                    source.getPosition());
+        }
         return obj;
     }
 
@@ -323,18 +379,18 @@ public abstract class BaseParser
         COSName key = parseCOSName();
         if (key == null || key.getName().isEmpty())
         {
-            LOG.warn("Empty COSName at offset " + source.getPosition());
+            LOG.warn("Empty COSName at offset {}", source.getPosition());
         }
         COSBase value = parseCOSDictionaryValue();
         skipSpaces();
         if (value == null)
         {
-            LOG.warn("Bad dictionary declaration at offset " + source.getPosition());
+            LOG.warn("Bad dictionary declaration at offset {}", source.getPosition());
             return false;
         }
         else if (value instanceof COSInteger && !((COSInteger) value).isValid())
         {
-            LOG.warn("Skipped out of range number value at offset " + source.getPosition());
+            LOG.warn("Skipped out of range number value at offset {}", source.getPosition());
         }
         else
         {
@@ -345,32 +401,35 @@ public abstract class BaseParser
         return true;
     }
 
+    /**
+     * Skip the upcoming CRLF or LF which are supposed to follow a stream.
+     * 
+     * @throws IOException
+     */
     protected void skipWhiteSpaces() throws IOException
     {
         //PDF Ref 3.2.7 A stream must be followed by either
         //a CRLF or LF but nothing else.
-
         int whitespace = source.read();
-
         //see brother_scan_cover.pdf, it adds whitespaces
         //after the stream but before the start of the
         //data, so just read those first
-        while (ASCII_SPACE == whitespace)
+        while (isSpace(whitespace))
         {
             whitespace = source.read();
         }
 
-        if (ASCII_CR == whitespace)
+        if (isCR(whitespace))
         {
             whitespace = source.read();
-            if (ASCII_LF != whitespace)
+            if (!isLF(whitespace))
             {
                 source.rewind(1);
                 //The spec says this is invalid but it happens in the real
                 //world so we must support it.
             }
         }
-        else if (ASCII_LF != whitespace)
+        else if (!isLF(whitespace))
         {
             //we are in an error.
             //but again we will do a lenient parsing and just assume that everything
@@ -387,8 +446,6 @@ public abstract class BaseParser
      *
      * The second bug was in this format /Title (c:\) /Producer
      *
-     * This patch moves this code out of the parseCOSString method, so it can be used twice.
-     *
      * @param bracesParameter the number of braces currently open.
      *
      * @return the corrected value of the brace counter
@@ -396,29 +453,38 @@ public abstract class BaseParser
      */
     private int checkForEndOfString(final int bracesParameter) throws IOException
     {
-        int braces = bracesParameter;
+        if (bracesParameter == 0)
+        {
+            return 0;
+        }
+        // Check the next 3 bytes if available
         byte[] nextThreeBytes = new byte[3];
         int amountRead = source.read(nextThreeBytes);
-
-        // Check the next 3 bytes if available
-        // The following cases are valid indicators for the end of the string
-        // 1. Next line contains another COSObject: CR + LF + '/'
-        // 2. COSDictionary ends in the next line: CR + LF + '>'
-        // 3. Next line contains another COSObject: CR + '/'
-        // 4. COSDictionary ends in the next line: CR + '>'
-        if (amountRead == 3 && nextThreeBytes[0] == ASCII_CR)
-        {
-            if ( (nextThreeBytes[1] == ASCII_LF && (nextThreeBytes[2] == '/') || nextThreeBytes[2] == '>')
-                    || nextThreeBytes[1] == '/' || nextThreeBytes[1] == '>')
-            {
-                braces = 0;
-            }
-        }
         if (amountRead > 0)
         {
             source.rewind(amountRead);
         }
-        return braces;
+        if (amountRead < 3)
+        {
+            return bracesParameter;
+        }
+        // The following cases are valid indicators for the end of the string
+        // 1. Next line contains another COSObject: CR + LF + '/'
+        // 2. COSDictionary ends in the next line: CR + LF + '>'
+        // 3. Next line contains another COSObject: LF + '/'
+        // 4. COSDictionary ends in the next line: LF + '>'
+        // 5. Next line contains another COSObject: CR + '/'
+        // 6. COSDictionary ends in the next line: CR + '>'
+        if (((isCR(nextThreeBytes[0]) || isLF(nextThreeBytes[0]))
+                && (nextThreeBytes[1] == '/' || nextThreeBytes[1] == '>')) //
+                || //
+                (isCR(nextThreeBytes[0]) && isLF(nextThreeBytes[1])
+                        && (nextThreeBytes[2] == '/' || nextThreeBytes[2] == '>')) //
+        )
+        {
+            return 0;
+        }
+        return bracesParameter;
     }
 
     /**
@@ -668,8 +734,10 @@ public abstract class BaseParser
             pbo = parseDirObject();
             if( pbo instanceof COSObject )
             {
+                // the current empty COSObject is replaced with the correct one
+                pbo = null;
                 // We have to check if the expected values are there or not PDFBOX-385
-                if (po.size() > 0 && po.get(po.size() - 1) instanceof COSInteger)
+                if (po.size() > 1 && po.get(po.size() - 1) instanceof COSInteger)
                 {
                     COSInteger genNumber = (COSInteger)po.remove( po.size() -1 );
                     if (po.size() > 0 && po.get(po.size() - 1) instanceof COSInteger)
@@ -683,31 +751,18 @@ public abstract class BaseParser
                         }
                         else
                         {
-                            LOG.warn("Invalid value(s) for an object key " + number.longValue()
-                                    + " " + genNumber.intValue());
-                            pbo = null;
+                            LOG.warn("Invalid value(s) for an object key {} {}", number.longValue(),
+                                    genNumber.intValue());
                         }
                     }
-                    else
-                    {
-                        // the object reference is somehow wrong
-                        pbo = null;
-                    }
-                }
-                else
-                {
-                    pbo = null;
                 }
             }
-            if( pbo != null )
-            {
-                po.add( pbo );
-            }
-            else
+            // something went wrong
+            if (pbo == null)
             {
                 //it could be a bad object in the array which is just skipped
-                LOG.warn("Corrupt array element at offset " + source.getPosition()
-                        + ", start offset: " + startPosition);
+                LOG.warn("Corrupt array element at offset {}, start offset: {}",
+                        source.getPosition(), startPosition);
                 String isThisTheEnd = readString();
                 // return immediately if a corrupt element is followed by another array
                 // to avoid a possible infinite recursion as most likely the whole array is corrupted
@@ -723,6 +778,10 @@ public abstract class BaseParser
                     return po;
                 }
             }
+            else
+            {
+                po.add(pbo);
+            }
             skipSpaces();
         }
         // read ']'
@@ -737,11 +796,29 @@ public abstract class BaseParser
      * @param ch The character
      * @return true if the character terminates a PDF name, otherwise false.
      */
-    protected boolean isEndOfName(int ch)
+    protected static boolean isEndOfName(int ch)
     {
-        return ch == ASCII_SPACE || ch == ASCII_CR || ch == ASCII_LF || ch == 9 || ch == '>' ||
-               ch == '<' || ch == '[' || ch =='/' || ch ==']' || ch ==')' || ch =='(' || 
-               ch == 0 || ch == '\f' || ch == '%';
+        switch (ch)
+        {
+        case ASCII_SPACE:
+        case ASCII_CR:
+        case ASCII_LF:
+        case ASCII_TAB:
+        case '>':
+        case '<':
+        case '[':
+        case '/':
+        case ']':
+        case ')':
+        case '(':
+        case ASCII_NULL:
+        case '\f':
+        case '%':
+        case -1:
+            return true;
+        default:
+            return false;
+        }
     }
 
     /**
@@ -755,9 +832,9 @@ public abstract class BaseParser
         readExpectedChar('/');
         ByteArrayOutputStream buffer = new ByteArrayOutputStream();
         int c = source.read();
-        while (c != -1)
+        while (!isEndOfName(c))
         {
-            int ch = c;
+            final int ch = c;
             if (ch == '#')
             {
                 int ch1 = source.read();
@@ -795,10 +872,6 @@ public abstract class BaseParser
                     buffer.write(ch);
                 }
             }
-            else if (isEndOfName(ch))
-            {
-                break;
-            }
             else
             {
                 buffer.write(ch);
@@ -809,35 +882,28 @@ public abstract class BaseParser
         {
             source.rewind(1);
         }
-        
-        byte[] bytes = buffer.toByteArray();
-        String string;
-        if (isValidUTF8(bytes))
-        {
-            string = new String(bytes, StandardCharsets.UTF_8);
-        }
-        else
-        {
-            // some malformed PDFs don't use UTF-8 see PDFBOX-3347
-            string = new String(bytes, Charset.forName("Windows-1252"));
-        }
-        return COSName.getPDFName(string);
+
+        return COSName.getPDFName(decodeBuffer(buffer));
     }
 
     /**
-     * Returns true if a byte sequence is valid UTF-8.
+     * Tries to decode the buffer content to an UTF-8 String. If that fails, tries the alternative Encoding.
+     * 
+     * @param buffer the {@link ByteArrayOutputStream} containing the bytes to decode
+     * @return the decoded String
      */
-    private boolean isValidUTF8(byte[] input)
+    private String decodeBuffer(ByteArrayOutputStream buffer)
     {
         try
         {
-            utf8Decoder.decode(ByteBuffer.wrap(input));
-            return true;
+            return utf8Decoder.decode(ByteBuffer.wrap(buffer.toByteArray())).toString();
         }
         catch (CharacterCodingException e)
         {
-            LOG.debug("Character could not be decoded using StandardCharsets.UTF_8 - returning false", e);
-            return false;
+            // some malformed PDFs don't use UTF-8 see PDFBOX-3347
+            LOG.debug(() -> "Buffer could not be decoded using StandardCharsets.UTF_8 - trying " + 
+                    ALTERNATIVE_CHARSET.name(), e);
+            return buffer.toString(ALTERNATIVE_CHARSET);
         }
     }
     
@@ -885,7 +951,7 @@ public abstract class BaseParser
         case (char)-1:
             return null;
         default:
-            if( Character.isDigit(c) || c == '-' || c == '+' || c == '.')
+            if (isDigit(c) || c == '-' || c == '+' || c == '.')
             {
                 return parseCOSNumber();
             }
@@ -910,9 +976,9 @@ public abstract class BaseParser
             }
             else
             {
-                LOG.warn("Skipped unexpected dir object = '" + badString + "' at offset "
-                        + source.getPosition() + " (start offset: " + startOffset + ")");
-                return COSNull.NULL;
+                LOG.warn("Skipped unexpected dir object = '{}' at offset {} (start offset: {})",
+                        badString, source.getPosition(), startOffset);
+                return this instanceof PDFStreamParser ? null : COSNull.NULL;
             }
         }
         return null;
@@ -948,7 +1014,7 @@ public abstract class BaseParser
         skipSpaces();
         StringBuilder buffer = new StringBuilder();
         int c = source.read();
-        while( !isEndOfName((char)c) && c != -1 )
+        while (!isEndOfName(c))
         {
             buffer.append( (char)c );
             c = source.read();
@@ -1036,22 +1102,10 @@ public abstract class BaseParser
     /**
      * This will tell if the next character is a closing brace( close of PDF array ).
      *
-     * @return true if the next byte is ']', false otherwise.
-     *
-     * @throws IOException If an IO error occurs.
-     */
-    protected boolean isClosing() throws IOException
-    {
-        return isClosing(source.peek());
-    }
-
-    /**
-     * This will tell if the next character is a closing brace( close of PDF array ).
-     *
      * @param c The character to check against end of line
      * @return true if the next byte is ']', false otherwise.
      */
-    protected boolean isClosing(int c)
+    protected static boolean isClosing(int c)
     {
         return c == ']';
     }
@@ -1094,18 +1148,6 @@ public abstract class BaseParser
     }
 
     /**
-     * This will tell if the next byte to be read is an end of line byte.
-     *
-     * @return true if the next byte is 0x0A or 0x0D.
-     *
-     * @throws IOException If there is an error reading from the stream.
-     */
-    protected boolean isEOL() throws IOException
-    {
-        return isEOL(source.peek());
-    }
-
-    /**
      * This will tell if the end of the data is reached.
      * 
      * @return true if the end of the data is reached.
@@ -1122,17 +1164,29 @@ public abstract class BaseParser
      * @param c The character to check against end of line
      * @return true if the next byte is 0x0A or 0x0D.
      */
-    protected boolean isEOL(int c)
+    protected static boolean isEOL(int c)
     {
         return isLF(c) || isCR(c);
     }
 
-    private boolean isLF(int c)
+    /**
+     * This will tell if the next byte to be read is a line feed.
+     *
+     * @param c The character to check against line feed
+     * @return true if the next byte is 0x0A.
+     */
+    private static boolean isLF(int c)
     {
         return ASCII_LF == c;
     }
 
-    private boolean isCR(int c)
+    /**
+     * This will tell if the next byte to be read is a carriage return.
+     *
+     * @param c The character to check against carriage return
+     * @return true if the next byte is 0x0D.
+     */
+    private static boolean isCR(int c)
     {
         return ASCII_CR == c;
     }
@@ -1155,10 +1209,20 @@ public abstract class BaseParser
      * @param c The character to check against whitespace
      * @return true if the character is a whitespace character.
      */
-    protected boolean isWhitespace( int c )
+    protected static boolean isWhitespace( int c )
     {
-        return c == 0 || c == 9 || c == 12  || c == ASCII_LF
-        || c == ASCII_CR || c == ASCII_SPACE;
+        switch (c)
+        {
+        case ASCII_NULL:
+        case ASCII_TAB:
+        case ASCII_FF:
+        case ASCII_LF:
+        case ASCII_CR:
+        case ASCII_SPACE:
+            return true;
+        default:
+            return false;
+        }
     }
 
     /**
@@ -1179,7 +1243,7 @@ public abstract class BaseParser
      * @param c The character to check against space
      * @return true if the next byte in the stream is a space character.
      */
-    protected boolean isSpace(int c)
+    private static boolean isSpace(int c)
     {
         return ASCII_SPACE == c;
     }
@@ -1267,7 +1331,8 @@ public abstract class BaseParser
         int retval = readInt();
         if(retval < 0 || retval > GENERATION_NUMBER_THRESHOLD)
         {
-            throw new IOException("Generation Number '" + retval + "' has more than 5 digits");
+            throw new IOException(
+                    "Generation Number '" + retval + "' has more than 5 digits or is negative");
         }
         return retval;
     }
@@ -1339,7 +1404,7 @@ public abstract class BaseParser
     {
         int lastByte;
         StringBuilder buffer = new StringBuilder();
-        while ((lastByte = source.read()) >= '0' && lastByte <= '9')
+        while (isDigit(lastByte = source.read()))
         {
             buffer.append( (char)lastByte );
             if (buffer.length() > MAX_LENGTH_LONG)

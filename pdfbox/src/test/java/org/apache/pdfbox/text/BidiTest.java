@@ -28,9 +28,10 @@ import java.io.LineNumberReader;
 import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.io.Writer;
+import java.nio.file.Files;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.junit.jupiter.api.AfterEach;
@@ -46,10 +47,10 @@ class BidiTest
     /**
      * Logger instance.
      */
-    private static final Log log = LogFactory.getLog(TestTextStripper.class);
+    private static final Logger LOG = LogManager.getLogger(BidiTest.class);
     
     private static final File IN_DIR = new File("src/test/resources/org/apache/pdfbox/text/");
-    private static final File outDir = new File("target/test-output");
+    private static final File OUT_DIR = new File("target/test-output");
     private static final String NAME_OF_PDF = "BidiSample.pdf";
     
     private static final String ENCODING = "UTF-8";
@@ -60,11 +61,7 @@ class BidiTest
     @BeforeEach
     public void setUp() throws IOException
     {
-        if (!outDir.exists() && !outDir.mkdirs())
-        {
-            throw (new IOException("Error creating " + outDir.getAbsolutePath() + " directory"));
-        }
-
+        Files.createDirectories(OUT_DIR.toPath());
         document = Loader.loadPDF(new File(IN_DIR, NAME_OF_PDF));
         stripper = new PDFTextStripper();
         stripper.setLineSeparator("\n");
@@ -74,14 +71,14 @@ class BidiTest
     void testSorted() throws IOException
     {
         File testFile = new File(IN_DIR, NAME_OF_PDF);
-        doTestFile(testFile, outDir, false, true);
+        doTestFile(testFile, OUT_DIR, false, true);
     }
 
     @Test
     void testNotSorted() throws IOException
     {
         File testFile = new File(IN_DIR, NAME_OF_PDF);
-        doTestFile(testFile, outDir, false, false);
+        doTestFile(testFile, OUT_DIR, false, false);
     }
 
     @AfterEach
@@ -104,11 +101,11 @@ class BidiTest
     {
         if(bSort)
         {
-            log.info("Preparing to parse " + inFile.getName() + " for sorted test");
+            LOG.info("Preparing to parse {} for sorted test", inFile.getName());
         }
         else
         {
-            log.info("Preparing to parse " + inFile.getName() + " for standard test");
+            LOG.info("Preparing to parse {} for standard test", inFile.getName());
         }
 
         File outFile;
@@ -137,8 +134,8 @@ class BidiTest
 
         if (bLogResult)
         {
-            log.info("Text for " + inFile.getName() + ":");
-            log.info(stripper.getText(document));
+            LOG.info("Text for {}:", inFile.getName());
+            LOG.info(stripper.getText(document));
         }
 
         if (!expectedFile.exists())
@@ -215,9 +212,9 @@ class BidiTest
                 if( expectedArray[expectedIndex] != actualArray[actualIndex] )
                 {
                     equals = false;
-                    log.warn("Lines differ at index"
-                     + " expected:" + expectedIndex + "-" + (int)expectedArray[expectedIndex]
-                     + " actual:" + actualIndex + "-" + (int)actualArray[actualIndex] );
+                    LOG.warn("Lines differ at index expected: {}-{} actual: {}-{}", expectedIndex,
+                            (int) expectedArray[expectedIndex], actualIndex,
+                            (int) actualArray[actualIndex]);
                     break;
                 }
                 expectedIndex = skipWhitespace( expectedArray, expectedIndex );
@@ -230,12 +227,12 @@ class BidiTest
                 if( expectedIndex != expectedArray.length )
                 {
                     equals = false;
-                    log.warn("Expected line is longer at:" + expectedIndex );
+                    LOG.warn("Expected line is longer at: {}", expectedIndex);
                 }
                 if( actualIndex != actualArray.length )
                 {
                     equals = false;
-                    log.warn("Actual line is longer at:" + actualIndex );
+                    LOG.warn("Actual line is longer at: {}", actualIndex);
                 }
             }
         }

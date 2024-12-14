@@ -21,8 +21,8 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.util.Base64;
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
 
 /**
  * Utility functions for hex encoding.
@@ -31,7 +31,7 @@ import org.apache.commons.logging.LogFactory;
  */
 public final class Hex
 {
-    private static final Log LOG = LogFactory.getLog(Hex.class);
+    private static final Logger LOG = LogManager.getLogger(Hex.class);
 
     /**
      * for hex conversion.
@@ -52,7 +52,7 @@ public final class Hex
      */
     public static String getString(byte b)
     {
-        char[] chars = new char[]{HEX_CHARS[getHighNibble(b)], HEX_CHARS[getLowNibble(b)]};
+        char[] chars = {HEX_CHARS[getHighNibble(b)], HEX_CHARS[getLowNibble(b)]};
         return new String(chars);
     }
 
@@ -206,7 +206,8 @@ public final class Hex
      */
     public static byte[] decodeBase64(String base64Value)
     {
-        return Base64.getDecoder().decode(base64Value.replaceAll("\\s", ""));
+        return Base64.getDecoder().
+                decode(StringUtil.PATTERN_SPACE.matcher(base64Value).replaceAll(""));
     }
 
     /**
@@ -234,7 +235,7 @@ public final class Hex
                 }
                 catch (NumberFormatException ex)
                 {
-                    LOG.error("Can't parse " + hexByte + ", aborting decode", ex);
+                    LOG.error(() -> "Can't parse " + hexByte + ", aborting decode", ex);
                     break;
                 }
                 i += 2;

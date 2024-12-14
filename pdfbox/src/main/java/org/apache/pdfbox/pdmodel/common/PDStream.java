@@ -16,8 +16,6 @@
  */
 package org.apache.pdfbox.pdmodel.common;
 
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -26,8 +24,8 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
 import org.apache.pdfbox.cos.COSArray;
 import org.apache.pdfbox.cos.COSBase;
 import org.apache.pdfbox.cos.COSDictionary;
@@ -39,7 +37,8 @@ import org.apache.pdfbox.cos.COSStream;
 import org.apache.pdfbox.filter.DecodeOptions;
 import org.apache.pdfbox.filter.Filter;
 import org.apache.pdfbox.filter.FilterFactory;
-import org.apache.pdfbox.io.IOUtils;
+import org.apache.pdfbox.io.RandomAccessInputStream;
+import org.apache.pdfbox.io.RandomAccessRead;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.common.filespecification.PDFileSpecification;
 
@@ -50,7 +49,7 @@ import org.apache.pdfbox.pdmodel.common.filespecification.PDFileSpecification;
  */
 public class PDStream implements COSObjectable
 {
-    private static final Log LOG = LogFactory.getLog(PDStream.class);
+    private static final Logger LOG = LogManager.getLogger(PDStream.class);
 
     private final COSStream stream;
     
@@ -132,13 +131,9 @@ public class PDStream implements COSObjectable
     private PDStream(PDDocument doc, InputStream input, COSBase filters) throws IOException
     {
         stream = doc.getDocument().createCOSStream();
-        try (OutputStream output = stream.createOutputStream(filters))
+        try (input; OutputStream output = stream.createOutputStream(filters))
         {
-            IOUtils.copy(input, output);
-        }
-        finally
-        {
-            input.close();
+            input.transferTo(output);
         }
     }
 
@@ -205,31 +200,23 @@ public class PDStream implements COSObjectable
     public InputStream createInputStream(List<String> stopFilters) throws IOException
     {
         InputStream is = stream.createRawInputStream();
-        ByteArrayOutputStream os = new ByteArrayOutputStream();
+        List<Filter> someFilters = new ArrayList<>();
         List<COSName> filters = getFilters();
-        for (int i = 0; i < filters.size(); i++)
+        for (COSName nextFilter : filters)
         {
-            COSName nextFilter = filters.get(i);
-            if ((stopFilters != null) && stopFilters.contains(nextFilter.getName()))
+            if (stopFilters != null && stopFilters.contains(nextFilter.getName()))
             {
                 break;
             }
-            else
-            {
-                Filter filter = FilterFactory.INSTANCE.getFilter(nextFilter);
-                try
-                {
-                    filter.decode(is, os, stream, i);
-                }
-                finally
-                {
-                    IOUtils.closeQuietly(is);
-                }
-                is = new ByteArrayInputStream(os.toByteArray());
-                os.reset();
-            }
+            someFilters.add(FilterFactory.INSTANCE.getFilter(nextFilter));
         }
-        return is;
+        if (someFilters.isEmpty())
+        {
+            return is;
+        }
+        RandomAccessRead decoded = Filter.decode(is, someFilters, getCOSObject(),
+                DecodeOptions.DEFAULT, null);
+        return new RandomAccessInputStream(decoded);
     }
 
     /**
@@ -320,7 +307,7 @@ public class PDStream implements COSObjectable
                 }
                 else
                 {
-                    LOG.warn("Expected COSDictionary, got " + base + ", ignored");
+                    LOG.warn("Expected COSDictionary, got {}, ignored", base);
                 }
             }
             return new COSArrayList<>(actuals, array);
@@ -414,7 +401,7 @@ public class PDStream implements COSObjectable
     {
         try (InputStream is = createInputStream())
         {
-            return IOUtils.toByteArray(is);
+            return is.readAllBytes();
         }
     }
     

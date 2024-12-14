@@ -28,9 +28,10 @@ import java.util.Deque;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.zip.DataFormatException;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
 import org.apache.pdfbox.contentstream.operator.MissingOperandException;
 import org.apache.pdfbox.contentstream.operator.state.EmptyGraphicsStackException;
 import org.apache.pdfbox.cos.COSArray;
@@ -74,12 +75,9 @@ import org.apache.pdfbox.pdmodel.graphics.blend.BlendMode;
  */
 public abstract class PDFStreamEngine
 {
-    private static final Log LOG = LogFactory.getLog(PDFStreamEngine.class);
+    private static final Logger LOG = LogManager.getLogger(PDFStreamEngine.class);
 
     private final Map<String, OperatorProcessor> operators = new HashMap<>(80);
-
-    private Matrix textMatrix;
-    private Matrix textLineMatrix;
 
     private Deque<PDGraphicsState> graphicsStack = new ArrayDeque<>();
 
@@ -123,8 +121,6 @@ public abstract class PDFStreamEngine
         currentPage = page;
         graphicsStack.clear();
         graphicsStack.push(new PDGraphicsState(page.getCropBox()));
-        textMatrix = null;
-        textLineMatrix = null;
         resources = null;
         initialMatrix = page.getMatrix();
     }
@@ -200,8 +196,17 @@ public abstract class PDFStreamEngine
         saveGraphicsState();
         Matrix softMaskCTM = getGraphicsState().getSoftMask().getInitialTransformationMatrix();
         getGraphicsState().setCurrentTransformationMatrix(softMaskCTM);
-        processTransparencyGroup(group);
-        restoreGraphicsState();
+        getGraphicsState().setTextMatrix(new Matrix());
+        getGraphicsState().setTextLineMatrix(new Matrix());
+
+        try
+        {
+            processTransparencyGroup(group);
+        }
+        finally
+        {
+            restoreGraphicsState();
+        }
     }
 
     /**
@@ -281,11 +286,8 @@ public abstract class PDFStreamEngine
 
         // note: we don't clip to the BBox as it is often wrong, see PDFBOX-1917
 
-        // save text matrices (Type 3 stream may contain BT/ET, see PDFBOX-2137)
-        Matrix textMatrixOld = textMatrix;
-        textMatrix = new Matrix();
-        Matrix textLineMatrixOld = textLineMatrix;
-        textLineMatrix = new Matrix();
+        getGraphicsState().setTextMatrix(new Matrix());
+        getGraphicsState().setTextLineMatrix(new Matrix());
 
         try
         {
@@ -293,10 +295,6 @@ public abstract class PDFStreamEngine
         }
         finally
         {
-            // restore text matrices
-            textMatrix = textMatrixOld;
-            textLineMatrix = textLineMatrixOld;
-
             restoreGraphicsStack(savedStack);
             popResources(parent);
         }
@@ -422,18 +420,12 @@ public abstract class PDFStreamEngine
         // clip to bounding box
         clipToRect(tilingBBox);
 
-        // save text matrices (pattern stream may contain BT/ET, see PDFBOX-4896)
-        Matrix textMatrixSave = textMatrix;
-        Matrix textLineMatrixSave = textLineMatrix;
-
         try
         {
             processStreamOperators(tilingPattern);
         }
         finally
         {
-            textMatrix = textMatrixSave;
-            textLineMatrix = textLineMatrixSave;
             initialMatrix = parentMatrix;
             restoreGraphicsStack(savedStack);
             popResources(parent);
@@ -680,12 +672,12 @@ public abstract class PDFStreamEngine
             }
             else if (obj instanceof COSArray)
             {
-                LOG.error("Nested arrays are not allowed in an array for TJ operation: " + obj);
+                LOG.error("Nested arrays are not allowed in an array for TJ operation: {}", obj);
             }
             else
             {
-                LOG.error("Unknown type " + obj.getClass().getSimpleName() +
-                        " in array for TJ operation: " + obj);
+                LOG.error("Unknown type {} in array for TJ operation: {}",
+                        obj.getClass().getSimpleName(), obj);
             }
         }
     }
@@ -699,7 +691,7 @@ public abstract class PDFStreamEngine
     protected void applyTextAdjustment(float tx, float ty)
     {
         // update the text matrix
-        textMatrix.translate(tx, ty);
+        getGraphicsState().getTextMatrix().translate(tx, ty);
     }
 
     /**
@@ -731,6 +723,8 @@ public abstract class PDFStreamEngine
                 fontSize * horizontalScaling, 0, // 0
                 0, fontSize,                     // 0
                 0, textState.getRise());         // 1
+        
+        Matrix textMatrix = getGraphicsState().getTextMatrix();
 
         // read the stream until it is empty
         InputStream in = new ByteArrayInputStream(string);
@@ -938,17 +932,21 @@ public abstract class PDFStreamEngine
             exception instanceof MissingResourceException ||
             exception instanceof MissingImageReaderException)
         {
-            LOG.error(exception.getMessage());
+            LOG.error(exception.getMessage(), exception);
         }
         else if (exception instanceof EmptyGraphicsStackException)
         {
-            LOG.warn(exception.getMessage());
+            LOG.warn(exception.getMessage(), exception);
         }
         else if (operator.getName().equals("Do"))
         {
             // todo: this too forgiving, but PDFBox has always worked this way for DrawObject
             //       some careful refactoring is needed
-            LOG.warn(exception.getMessage());
+            LOG.warn(exception.getMessage(), exception);
+        }
+        else if (exception.getCause() instanceof DataFormatException)
+        {
+            LOG.warn(exception.getMessage(), exception);
         }
         else
         {
@@ -1017,7 +1015,7 @@ public abstract class PDFStreamEngine
      */
     public Matrix getTextLineMatrix()
     {
-        return textLineMatrix;
+        return getGraphicsState().getTextLineMatrix();
     }
 
     /**
@@ -1025,7 +1023,7 @@ public abstract class PDFStreamEngine
      */
     public void setTextLineMatrix(Matrix value)
     {
-        textLineMatrix = value;
+        getGraphicsState().setTextLineMatrix(value);
     }
 
     /**
@@ -1033,7 +1031,7 @@ public abstract class PDFStreamEngine
      */
     public Matrix getTextMatrix()
     {
-        return textMatrix;
+        return getGraphicsState().getTextMatrix();
     }
 
     /**
@@ -1041,7 +1039,7 @@ public abstract class PDFStreamEngine
      */
     public void setTextMatrix(Matrix value)
     {
-        textMatrix = value;
+        getGraphicsState().setTextMatrix(value);
     }
 
     /**
@@ -1050,11 +1048,6 @@ public abstract class PDFStreamEngine
      */
     public void setLineDashPattern(COSArray array, int phase)
     {
-        if (phase < 0)
-        {
-            LOG.warn("Dash phase has negative value " + phase + ", set to 0");
-            phase = 0;
-        }
         PDLineDashPattern lineDash = new PDLineDashPattern(array, phase);
         getGraphicsState().setLineDashPattern(lineDash);
     }
@@ -1148,7 +1141,7 @@ public abstract class PDFStreamEngine
         --level;
         if (level < 0)
         {
-            LOG.error("level is " + level);
+            LOG.error("level is {}", level);
         }
     }
 }

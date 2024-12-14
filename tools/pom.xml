@@ -23,7 +23,7 @@
   <parent>
     <groupId>org.apache.pdfbox</groupId>
     <artifactId>pdfbox-parent</artifactId>
-    <version>3.0.0-SNAPSHOT</version>
+    <version>4.0.0-SNAPSHOT</version>
     <relativePath>../parent/pom.xml</relativePath>
   </parent>
 
@@ -37,12 +37,13 @@
   </description>
   <inceptionYear>2002</inceptionYear>
 
+  	<scm>
+		<connection>scm:svn:https://svn.apache.org/repos/asf/pdfbox/trunk/tools</connection>
+		<developerConnection>scm:svn:https://svn.apache.org/repos/asf/pdfbox/trunk/tools</developerConnection>
+		<url>https://svn.apache.org/viewvc/pdfbox/trunk/tools</url>
+	</scm>
+
   <dependencies>
-    <dependency>
-      <groupId>org.bouncycastle</groupId>
-      <artifactId>bcmail-jdk18on</artifactId>
-      <optional>true</optional>
-    </dependency>
     <dependency>
         <groupId>${project.groupId}</groupId>
         <artifactId>pdfbox-debugger</artifactId>
@@ -51,20 +52,18 @@
     <dependency>
       <groupId>commons-io</groupId>
       <artifactId>commons-io</artifactId>
-      <scope>compile</scope>
+      <version>${commons-io.version}</version>
     </dependency>
     <dependency>
       <groupId>info.picocli</groupId>
       <artifactId>picocli</artifactId>
+      <version>${picocli.version}</version>
     </dependency>
     <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter</artifactId>
-    </dependency>
-    <dependency>
-        <groupId>org.apache.pdfbox</groupId>
-        <artifactId>jbig2-imageio</artifactId>
-        <scope>test</scope>
+      <version>${junit.version}</version>
+      <scope>test</scope>
     </dependency>
     <!-- For legal reasons (incompatible license), these two dependencies 
         are to be used only in the tests and may not be distributed. 
@@ -72,11 +71,13 @@
     <dependency>
         <groupId>com.github.jai-imageio</groupId>
         <artifactId>jai-imageio-core</artifactId>
+        <version>${jai.version}</version>
         <scope>test</scope>
     </dependency>    
     <dependency>
         <groupId>com.github.jai-imageio</groupId>
         <artifactId>jai-imageio-jpeg2000</artifactId>
+        <version>${jai.version}</version>
         <scope>test</scope>
     </dependency>
   </dependencies>

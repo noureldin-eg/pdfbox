@@ -30,8 +30,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.cos.COSArray;
 import org.apache.pdfbox.cos.COSBase;
@@ -87,7 +87,7 @@ public class PDFMergerUtility
     /**
      * Log instance.
      */
-    private static final Log LOG = LogFactory.getLog(PDFMergerUtility.class);
+    private static final Logger LOG = LogManager.getLogger(PDFMergerUtility.class);
 
     private final List<Object> sources;
     private String destinationFileName;
@@ -237,8 +237,8 @@ public class PDFMergerUtility
 
     /**
      * Get the destination document information that is to be set in
-     * {@link #mergeDocuments(org.apache.pdfbox.io.StreamCacheCreateFunction) }. The default is null, which means that
-     * it is ignored.
+     * {@link #mergeDocuments(org.apache.pdfbox.io.RandomAccessStreamCache.StreamCacheCreateFunction) }.
+     * The default is null, which means that it is ignored.
      *
      * @return The destination document information.
      */
@@ -249,8 +249,8 @@ public class PDFMergerUtility
 
     /**
      * Set the destination document information that is to be set in
-     * {@link #mergeDocuments(org.apache.pdfbox.io.StreamCacheCreateFunction) }. The default is null, which means that
-     * it is ignored.
+     * {@link #mergeDocuments(org.apache.pdfbox.io.RandomAccessStreamCache.StreamCacheCreateFunction) }.
+     * The default is null, which means that it is ignored.
      *
      * @param info The destination document information.
      */
@@ -261,8 +261,8 @@ public class PDFMergerUtility
 
     /**
      * Set the destination metadata that is to be set in
-     * {@link #mergeDocuments(org.apache.pdfbox.io.StreamCacheCreateFunction) }. The default is null, which means that
-     * it is ignored.
+     * {@link #mergeDocuments(org.apache.pdfbox.io.RandomAccessStreamCache.StreamCacheCreateFunction) }.
+     * The default is null, which means that it is ignored.
      *
      * @return The destination metadata.
      */
@@ -273,8 +273,8 @@ public class PDFMergerUtility
 
     /**
      * Set the destination metadata that is to be set in
-     * {@link #mergeDocuments(org.apache.pdfbox.io.StreamCacheCreateFunction) }. The default is null, which means that
-     * it is ignored.
+     * {@link #mergeDocuments(org.apache.pdfbox.io.RandomAccessStreamCache.StreamCacheCreateFunction) }.
+     * The default is null, which means that it is ignored.
      *
      * @param meta The destination metadata.
      */
@@ -525,7 +525,7 @@ public class PDFMergerUtility
 
         PDDocumentInformation destInfo = destination.getDocumentInformation();
         PDDocumentInformation srcInfo = source.getDocumentInformation();
-        mergeInto(srcInfo.getCOSObject(), destInfo.getCOSObject(), Collections.<COSName>emptySet());
+        mergeInto(srcInfo.getCOSObject(), destInfo.getCOSObject(), Collections.emptySet());
 
         // use the highest version number for the resulting pdf
         float destVersion = destination.getVersion();
@@ -697,7 +697,8 @@ public class PDFMergerUtility
                     COSBase base = srcNums.getObject(i);
                     if (!(base instanceof COSNumber))
                     {
-                        LOG.error("page labels ignored, index " + i + " should be a number, but is " + base);
+                        LOG.error("page labels ignored, index {} should be a number, but is {}", i,
+                                base);
                         // remove what we added
                         while (destNums.size() > startSize)
                         {
@@ -906,11 +907,11 @@ public class PDFMergerUtility
         PDViewerPreferences destViewerPreferences = destCatalog.getViewerPreferences();
         if (destViewerPreferences == null)
         {
-            destViewerPreferences = new PDViewerPreferences(new COSDictionary());
+            destViewerPreferences = new PDViewerPreferences();
             destCatalog.setViewerPreferences(destViewerPreferences);
         }
         mergeInto(srcViewerPreferences.getCOSObject(), destViewerPreferences.getCOSObject(),
-                  Collections.<COSName>emptySet());
+                  Collections.emptySet());
 
         // check the booleans - set to true if one is set and true
         if (srcViewerPreferences.hideToolbar() || destViewerPreferences.hideToolbar())
@@ -985,7 +986,7 @@ public class PDFMergerUtility
             srcKArray.add(clonedSrcKEntry);
         }
 
-        if (srcKArray.size() == 0)
+        if (srcKArray.isEmpty())
         {
             return;
         }
@@ -1023,7 +1024,7 @@ public class PDFMergerUtility
             }
         }
 
-        if (dstKArray.size() == 0)
+        if (dstKArray.isEmpty())
         {
             updateParentEntry(srcKArray, destStructTree.getCOSObject(), null);
             destStructTree.setK(srcKArray);
@@ -1089,6 +1090,10 @@ public class PDFMergerUtility
             PDStructureTreeRoot srcStructTree,
             PDStructureTreeRoot destStructTree) throws IOException
     {
+        if (srcStructTree == null)
+        {
+            return;
+        }
         PDNameTreeNode<PDStructureElement> srcIDTree = srcStructTree.getIDTree();
         if (srcIDTree == null)
         {
@@ -1105,7 +1110,7 @@ public class PDFMergerUtility
         {
             if (destNames.containsKey(entry.getKey()))
             {
-                LOG.warn("key " + entry.getKey() + " already exists in destination IDTree");
+                LOG.warn("key {} already exists in destination IDTree", entry.getKey());
             }
             else
             {
@@ -1127,6 +1132,10 @@ public class PDFMergerUtility
     static Map<String, PDStructureElement> getIDTreeAsMap(PDNameTreeNode<PDStructureElement> idTree)
             throws IOException
     {
+        if (idTree == null)
+        {
+            return new LinkedHashMap<>();
+        }
         Map<String, PDStructureElement> names = idTree.getNames();
         if (names == null)
         {
@@ -1153,6 +1162,10 @@ public class PDFMergerUtility
     static Map<Integer, COSObjectable> getNumberTreeAsMap(PDNumberTreeNode tree)
             throws IOException
     {
+        if (tree == null)
+        {
+            return new LinkedHashMap<>();
+        }
         Map<Integer, COSObjectable> numbers = tree.getNumbers();
         if (numbers == null)
         {
@@ -1177,11 +1190,11 @@ public class PDFMergerUtility
     private void mergeRoleMap(PDStructureTreeRoot srcStructTree, PDStructureTreeRoot destStructTree)
     {
         COSDictionary srcDict = srcStructTree.getCOSObject().getCOSDictionary(COSName.ROLE_MAP);
-        COSDictionary destDict = destStructTree.getCOSObject().getCOSDictionary(COSName.ROLE_MAP);
         if (srcDict == null)
         {
             return;
         }
+        COSDictionary destDict = destStructTree.getCOSObject().getCOSDictionary(COSName.ROLE_MAP);
         if (destDict == null)
         {
             destStructTree.getCOSObject().setItem(COSName.ROLE_MAP, srcDict); // clone not needed
@@ -1197,7 +1210,7 @@ public class PDFMergerUtility
             }
             if (destDict.containsKey(entry.getKey()))
             {
-                LOG.warn("key " + entry.getKey() + " already exists in destination RoleMap");
+                LOG.warn("key {} already exists in destination RoleMap", entry.getKey());
             }
             else
             {
@@ -1275,7 +1288,7 @@ public class PDFMergerUtility
         List<PDField> srcFields = srcAcroForm.getFields();
         COSArray destFields;
 
-        if (srcFields != null && !srcFields.isEmpty())
+        if (!srcFields.isEmpty())
         {
             // if a form is merged multiple times using PDFBox the newly generated
             // fields starting with dummyFieldName may already exist. We need to determine the last unique 
@@ -1286,7 +1299,7 @@ public class PDFMergerUtility
             for (PDField destField : destAcroForm.getFieldTree())
             {
                 String fieldName = destField.getPartialName();
-                if (fieldName.startsWith(prefix))
+                if (fieldName != null && fieldName.startsWith(prefix))
                 {
                     String suffix = fieldName.substring(prefixLength);
                     if (suffix.matches("\\d+"))
@@ -1436,18 +1449,21 @@ public class PDFMergerUtility
                 COSBase item = parentTreeEntry.getItem(COSName.OBJ);
                 if (item instanceof COSObject)
                 {
-                    LOG.debug("clone potential orphan object in structure tree: " + item +
-                            ", Type: " + objDict.getNameAsString(COSName.TYPE) +
-                            ", Subtype: " + objDict.getNameAsString(COSName.SUBTYPE) +
-                            ", T: " + objDict.getNameAsString(COSName.T));
+                    LOG.debug(
+                            "clone potential orphan object in structure tree: {}, Type: {}, Subtype: {}, T: {}",
+                            () -> item,
+                            () -> objDict.getNameAsString(COSName.TYPE),
+                            () -> objDict.getNameAsString(COSName.SUBTYPE),
+                            () -> objDict.getNameAsString(COSName.T));
                 }
                 else
                 {
                     // don't display in full because of stack overflow
-                    LOG.debug("clone potential orphan object in structure tree" +
-                            ", Type: " + objDict.getNameAsString(COSName.TYPE) +
-                            ", Subtype: " + objDict.getNameAsString(COSName.SUBTYPE) +
-                            ", T: " + objDict.getNameAsString(COSName.T));
+                    LOG.debug(
+                            "clone potential orphan object in structure tree, Type: {}, Subtype: {}, T: {}",
+                            () -> objDict.getNameAsString(COSName.TYPE),
+                            () -> objDict.getNameAsString(COSName.SUBTYPE),
+                            () -> objDict.getNameAsString(COSName.T));
                 }
                 parentTreeEntry.setItem(COSName.OBJ, cloner.cloneForNewDocument(objDict));
             }

@@ -17,13 +17,17 @@
 package org.apache.pdfbox.pdmodel.documentinterchange.logicalstructure;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
+import org.apache.pdfbox.cos.COSArray;
 import org.apache.pdfbox.cos.COSBase;
 import org.apache.pdfbox.cos.COSDictionary;
 import org.apache.pdfbox.cos.COSName;
+import org.apache.pdfbox.cos.COSObject;
 import org.apache.pdfbox.pdmodel.PDStructureElementNameTreeNode;
 import org.apache.pdfbox.pdmodel.common.COSDictionaryMap;
 import org.apache.pdfbox.pdmodel.common.PDNameTreeNode;
@@ -42,7 +46,7 @@ public class PDStructureTreeRoot extends PDStructureNode
     /**
      * Log instance.
      */
-    private static final Log LOG = LogFactory.getLog(PDStructureTreeRoot.class);
+    private static final Logger LOG = LogManager.getLogger(PDStructureTreeRoot.class);
 
     private static final String TYPE = "StructTreeRoot";
 
@@ -67,7 +71,7 @@ public class PDStructureTreeRoot extends PDStructureNode
 
     /**
      * Returns the K entry. This can be a dictionary representing a structure element, or an array
-     * of them.
+     * of them. To get it as a list of PDStructureElement objects, use {@link #getKids()} instead.
      *
      * @return the K entry.
      */
@@ -108,9 +112,15 @@ public class PDStructureTreeRoot extends PDStructureNode
     }
 
     /**
-     * Returns the parent tree.
-     * 
-     * @return the parent tree
+     * Returns the parent tree.<p>
+     * The keys correspond to a single page of the document or to an individual object, e.g. an
+     * annotation or an XObject, which have a <b>/StructParent</b> or <b>/StructParents</b>
+     * entry.<p>
+     * The values of type {@link PDParentTreeValue} are either a dictionary or an array. It's a
+     * dictionary for individual objects like an annotation or an XObject, and an array for a page
+     * object or a content stream containing marked-content sequences identified by an MCID.
+     *
+     * @return the parent tree.
      */
     public PDNumberTreeNode getParentTree()
     {
@@ -119,8 +129,16 @@ public class PDStructureTreeRoot extends PDStructureNode
     }
 
     /**
-     * Sets the parent tree.
-     * 
+     * Sets the parent tree.<p>
+     * The keys correspond to a single page of the document or to an individual object, e.g. an
+     * annotation or an XObject, which have a <b>/StructParent</b> or <b>/StructParents</b>
+     * entry.<p>
+     * The values of type {@link PDParentTreeValue} are either a dictionary or an array. It's a
+     * dictionary for individual objects like an annotation or an XObject, and an array for a page
+     * object or a content stream containing marked-content sequences identified by an MCID.
+     * <p>
+     * To create an empty parent tree, call {@code new PDNumberTreeNode(PDParentTreeValue.class)}.
+     *
      * @param parentTree the parent tree
      */
     public void setParentTree(PDNumberTreeNode parentTree)
@@ -129,9 +147,10 @@ public class PDStructureTreeRoot extends PDStructureNode
     }
 
     /**
-     * Returns the next key in the parent tree.
-     * 
-     * @return the next key in the parent tree
+     * Returns The next key for the parent tree. This is a number greater than any existing key, and
+     * which shall be used for the next entry to be added to the tree.
+     *
+     * @return The next key for the parent tree
      */
     public int getParentTreeNextKey()
     {
@@ -139,9 +158,10 @@ public class PDStructureTreeRoot extends PDStructureNode
     }
 
     /**
-     * Sets the next key in the parent tree.
+     * Sets the next key in the parent tree. This is a number greater than any existing key, and
+     * which shall be used for the next entry to be added to the tree.
      * 
-     * @param parentTreeNextkey the next key in the parent tree.
+     * @param parentTreeNextkey The next key in the parent tree.
      */
     public void setParentTreeNextKey(int parentTreeNextkey)
     {
@@ -182,4 +202,73 @@ public class PDStructureTreeRoot extends PDStructureNode
         this.getCOSObject().setItem(COSName.ROLE_MAP, rmDic);
     }
 
+    /**
+     * Sets the ClassMap.
+     * 
+     * @return the ClassMap, never null. The elements are either {@link PDAttributeObject} or lists
+     * of it.
+     */
+    public Map<String, Object> getClassMap()
+    {
+        Map<String, Object> classMap = new HashMap<>();
+        COSDictionary classMapDictionary = this.getCOSObject().getCOSDictionary(COSName.CLASS_MAP);
+        if (classMapDictionary == null)
+        {
+            return classMap;
+        }
+        classMapDictionary.forEach((name, base) ->
+        {
+            if (base instanceof COSObject)
+            {
+                base = ((COSObject) base).getObject();
+            }
+            if (base instanceof COSDictionary)
+            {
+                classMap.put(name.getName(), PDAttributeObject.create((COSDictionary) base));
+            }
+            else if (base instanceof COSArray)
+            {
+                COSArray array = (COSArray) base;
+                List<PDAttributeObject> list = new ArrayList<>();
+                for (int i = 0; i < array.size(); ++i)
+                {
+                    COSBase base2 = array.getObject(i);
+                    if (base2 instanceof COSDictionary)
+                    {
+                        list.add(PDAttributeObject.create((COSDictionary) base2));
+                    }
+                }
+                classMap.put(name.getName(), list);
+            }
+        });
+        return classMap;
+    }
+
+    /**
+     * Sets the ClassMap.
+     * 
+     * @param classMap null, or a map whose elements are either {@link PDAttributeObject} or lists
+     * of it.
+     */
+    public void setClassMap(Map<String, Object> classMap)
+    {
+        if (classMap == null || classMap.isEmpty())
+        {
+            this.getCOSObject().removeItem(COSName.CLASS_MAP);
+            return;
+        }
+        COSDictionary classMapDictionary = new COSDictionary();
+        classMap.forEach((name, object) ->
+        {
+            if (object instanceof PDAttributeObject)
+            {
+                classMapDictionary.setItem(name, ((PDAttributeObject) object).getCOSObject());
+            }
+            else if (object instanceof List)
+            {
+                classMapDictionary.setItem(name, new COSArray((List<PDAttributeObject>) object));
+            }
+        });
+        this.getCOSObject().setItem(COSName.CLASS_MAP, classMapDictionary);        
+    }
 }

@@ -18,6 +18,7 @@
 package org.apache.pdfbox.debugger.ui.textsearcher;
 
 import java.awt.Color;
+import java.awt.Rectangle;
 import java.awt.event.ActionEvent;
 import java.awt.event.ComponentEvent;
 import java.awt.event.ComponentListener;
@@ -34,8 +35,8 @@ import javax.swing.text.BadLocationException;
 import javax.swing.text.DefaultHighlighter;
 import javax.swing.text.Highlighter;
 import javax.swing.text.JTextComponent;
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
 
 import org.apache.pdfbox.debugger.PDFDebugger;
 
@@ -44,7 +45,7 @@ import org.apache.pdfbox.debugger.PDFDebugger;
  */
 public class Searcher implements DocumentListener, ChangeListener, ComponentListener
 {
-    private static final Log LOG = LogFactory.getLog(Searcher.class);
+    private static final Logger LOG = LogManager.getLogger(Searcher.class);
 
     private static final Highlighter.HighlightPainter PAINTER =
             new DefaultHighlighter.DefaultHighlightPainter(Color.yellow);
@@ -192,7 +193,7 @@ public class Searcher implements DocumentListener, ChangeListener, ComponentList
     {
         try
         {
-            textComponent.scrollRectToVisible(textComponent.modelToView(offset));
+            textComponent.scrollRectToVisible((Rectangle) textComponent.modelToView2D(offset));
         }
         catch (BadLocationException e)
         {

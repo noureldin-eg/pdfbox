@@ -44,12 +44,12 @@ public class ContentStreamWriter
     /**
      * space character.
      */
-    public static final byte[] SPACE = new byte[] { 32 };
+    public static final byte[] SPACE = { 32 };
 
     /**
      * standard line separator
      */
-    public static final byte[] EOL = new byte[] { 0x0A };
+    public static final byte[] EOL = { 0x0A };
 
     /**
      * This will create a new content stream writer.
@@ -112,7 +112,52 @@ public class ContentStreamWriter
         }
     }
 
-    private void writeObject( Object o ) throws IOException
+    private void writeObject(Object o) throws IOException
+    {
+        if (o instanceof COSBase)
+        {
+            writeObject((COSBase) o);
+        }
+        else if (o instanceof Operator)
+        {
+            writeObject((Operator) o);
+        }
+        else
+        {
+            throw new IOException("Error:Unknown type in content stream:" + o);
+        }
+    }
+
+    private void writeObject(Operator op) throws IOException
+    {
+        if (op.getName().equals(OperatorName.BEGIN_INLINE_IMAGE))
+        {
+            output.write(OperatorName.BEGIN_INLINE_IMAGE.getBytes(StandardCharsets.ISO_8859_1));
+            output.write(EOL);
+            COSDictionary dic = op.getImageParameters();
+            for (COSName key : dic.keySet())
+            {
+                COSBase value = dic.getDictionaryObject(key);
+                key.writePDF(output);
+                output.write(SPACE);
+                writeObject(value);
+                output.write(EOL);
+            }
+            output.write(OperatorName.BEGIN_INLINE_IMAGE_DATA.getBytes(StandardCharsets.ISO_8859_1));
+            output.write(EOL);
+            output.write(op.getImageData());
+            output.write(EOL);
+            output.write(OperatorName.END_INLINE_IMAGE.getBytes(StandardCharsets.ISO_8859_1));
+            output.write(EOL);
+        }
+        else
+        {
+            output.write(op.getName().getBytes(StandardCharsets.ISO_8859_1));
+            output.write(EOL);
+        }
+    }
+
+    private void writeObject( COSBase o ) throws IOException
     {
         if( o instanceof COSString )
         {
@@ -164,35 +209,6 @@ public class ContentStreamWriter
             }
             output.write( COSWriter.DICT_CLOSE );
             output.write( SPACE );
-        }
-        else if( o instanceof Operator)
-        {
-            Operator op = (Operator)o;
-            if( op.getName().equals( OperatorName.BEGIN_INLINE_IMAGE ) )
-            {
-                output.write( OperatorName.BEGIN_INLINE_IMAGE.getBytes(StandardCharsets.ISO_8859_1) );
-                output.write(EOL);
-                COSDictionary dic = op.getImageParameters();
-                for( COSName key : dic.keySet() )
-                {
-                    Object value = dic.getDictionaryObject( key );
-                    key.writePDF( output );
-                    output.write( SPACE );
-                    writeObject( value );
-                    output.write( EOL );
-                }
-                output.write( OperatorName.BEGIN_INLINE_IMAGE_DATA.getBytes(StandardCharsets.ISO_8859_1) );
-                output.write( EOL );
-                output.write( op.getImageData() );
-                output.write( EOL );
-                output.write( OperatorName.END_INLINE_IMAGE.getBytes(StandardCharsets.ISO_8859_1) );
-                output.write( EOL );
-            }
-            else
-            {
-                output.write( op.getName().getBytes(StandardCharsets.ISO_8859_1) );
-                output.write( EOL );
-            }
         }
         else if (o instanceof COSNull)
         {

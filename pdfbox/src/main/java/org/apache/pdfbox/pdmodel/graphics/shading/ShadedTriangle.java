@@ -100,7 +100,7 @@ class ShadedTriangle
      */
     private int calcDeg(Point2D[] p)
     {
-        Set<Point> set = new HashSet<>();
+        Set<Point> set = new HashSet<>(3);
         for (Point2D itp : p)
         {
             Point np = new Point((int) Math.round(itp.getX() * 1000), (int) Math.round(itp.getY() * 1000));
@@ -232,11 +232,12 @@ class ShadedTriangle
     public float[] calcColor(Point2D p)
     {
         int numberOfColorComponents = color[0].length;
-        float[] pCol = new float[numberOfColorComponents];
+        float[] pCol = null;
 
         switch (degree)
         {
             case 1:
+                pCol = new float[numberOfColorComponents];
                 for (int i = 0; i < numberOfColorComponents; i++)
                 {
                     // average
@@ -246,8 +247,10 @@ class ShadedTriangle
             case 2:
                 // linear interpolation
                 Point tp = new Point((int) Math.round(p.getX()), (int) Math.round(p.getY()));
-                return line.calcColor(tp);
+                pCol = line.calcColor(tp);
+                break;
             default:
+                pCol = new float[numberOfColorComponents];
                 float aw = (float) (getArea(p, corner[1], corner[2]) / area);
                 float bw = (float) (getArea(p, corner[2], corner[0]) / area);
                 float cw = (float) (getArea(p, corner[0], corner[1]) / area);

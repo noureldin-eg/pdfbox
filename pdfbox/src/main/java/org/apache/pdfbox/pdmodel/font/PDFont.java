@@ -25,8 +25,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
 import org.apache.fontbox.afm.FontMetrics;
 import org.apache.fontbox.cmap.CMap;
 import org.apache.pdfbox.cos.COSArray;
@@ -49,7 +49,7 @@ import org.apache.pdfbox.util.Vector;
  */
 public abstract class PDFont implements COSObjectable, PDFontLike
 {
-    private static final Log LOG = LogFactory.getLog(PDFont.class);
+    private static final Logger LOG = LogManager.getLogger(PDFont.class);
     protected static final Matrix DEFAULT_FONT_MATRIX = new Matrix(0.001f, 0, 0, 0.001f, 0, 0);
 
     protected final COSDictionary dict;
@@ -144,7 +144,14 @@ public abstract class PDFont implements COSObjectable, PDFontLike
             cmap = readCMap(toUnicode);
             if (cmap != null && !cmap.hasUnicodeMappings())
             {
-                LOG.warn("Invalid ToUnicode CMap in font " + getName());
+                String name = getName();
+                LOG.warn("Invalid ToUnicode CMap in font {}", name);
+                if (toUnicode instanceof COSStream && name != null &&
+                        (name.startsWith("Tahoma") || name.startsWith("Verdana")))
+                {
+                    // PDFBOX-5384: workaround inspired by PDF.js 15719 and 11242
+                    return null;
+                }
                 String cmapName = cmap.getName() != null ? cmap.getName() : "";
                 String ordering = cmap.getOrdering() != null ? cmap.getOrdering() : "";
                 COSName encoding = dict.getCOSName(COSName.ENCODING);
@@ -165,7 +172,7 @@ public abstract class PDFont implements COSObjectable, PDFontLike
         }
         catch (IOException ex)
         {
-            LOG.error("Could not read ToUnicode CMap in font " + getName(), ex);
+            LOG.error(() -> "Could not read ToUnicode CMap in font " + getName(), ex);
         }
         return cmap;
     }
@@ -470,7 +477,7 @@ public abstract class PDFont implements COSObjectable, PDFontLike
                 // code->Unicode maps. See sample_fonts_solidconvertor.pdf for an example.
                 // PDFBOX-3123: do this only if the /ToUnicode entry is a name
                 // PDFBOX-4322: identity streams are OK too
-                return new String(new char[] { (char) code });
+                return String.valueOf((char) code);
             }
             else
             {
@@ -545,8 +552,8 @@ public abstract class PDFont implements COSObjectable, PDFontLike
     }
 
     /**
-     * Determines the width of the space character.
-     * 
+     * Determines the width of the space character. This is very important for text extraction.
+     *
      * @return the width of the space character
      */
     public float getSpaceWidth()
@@ -565,7 +572,21 @@ public abstract class PDFont implements COSObjectable, PDFontLike
                 }
                 else
                 {
-                    fontWidthOfSpace = getWidth(32);
+                    try
+                    {
+                        // PDFBOX-5920: try with encoding, which gets the correct code
+                        fontWidthOfSpace = getStringWidth(" ");
+                    }
+                    catch (IllegalArgumentException | UnsupportedOperationException ex)
+                    {
+                        // Happens if space is not available in the font
+                        // or if encoding isn't implemented
+                        LOG.debug(ex.getMessage(), ex);
+                    }
+                    if (fontWidthOfSpace <= 0)
+                    {
+                        fontWidthOfSpace = getWidth(32);
+                    }
                 }
                 
                 // try to get it from the font itself
@@ -581,9 +602,10 @@ public abstract class PDFont implements COSObjectable, PDFontLike
             }
             catch (Exception e)
             {
-                LOG.error("Can't determine the width of the space character, assuming 250", e);
+                LOG.error("Can't determine the width of the space character for font {}, assuming 250", getName(),e);
                 fontWidthOfSpace = 250f;
             }
+            LOG.debug("Space width for font {} is {}", getName(), fontWidthOfSpace);
         }
         return fontWidthOfSpace;
     }

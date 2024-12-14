@@ -54,11 +54,13 @@ public abstract class SetColor extends OperatorProcessor
             }
             if (!checkArrayTypesClass(arguments, COSNumber.class))
             {
+                // PDFBOX-5851: set an invalid color because Pattern colorspace is missing
+                // this will produce transparency in PageDrawer
+                setColor(new PDColor(new float[0], null));
                 return;
             }
         }
-        COSArray array = new COSArray();
-        array.addAll(arguments);
+        COSArray array = new COSArray(arguments);
         setColor(new PDColor(array, colorSpace));
     }
 

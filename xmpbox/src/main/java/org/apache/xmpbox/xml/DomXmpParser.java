@@ -227,12 +227,14 @@ public class DomXmpParser
                 }
                 else if (XMLConstants.XMLNS_ATTRIBUTE.equals(attr.getPrefix()))
                 {
-                    if (!strictParsing)
+                    String namespace = attr.getValue();
+                    if (!strictParsing && !tm.isStructuredTypeNamespace(namespace))
                     {
-                        // Add the schema on the fly if it can't be found
+                        // PDFBOX-5128: Add the schema on the fly if it can't be found
+                        // PDFBOX-5649: But only if the namespace isn't already known
+                        // because this adds a namespace without property descriptions
                         String prefix = attr.getLocalName();
-                        String namespace = attr.getValue();
-                        
+
                         XMPSchema schema = xmp.getSchema(namespace);
                         if (schema == null && tm.getSchemaFactory(namespace) == null)
                         {
@@ -300,6 +302,7 @@ public class DomXmpParser
         // parse children elements as properties
         for (Element property : properties)
         {
+            nsFinder.push(property);
             String namespace = property.getNamespaceURI();
             PropertyType type = checkPropertyDefinition(xmp, DomHelper.getQName(property));
             // create the container
@@ -317,6 +320,7 @@ public class DomXmpParser
             ComplexPropertyContainer container = schema.getContainer();
             // create property
             createProperty(xmp, property, type, container);
+            nsFinder.pop();
         }
     }
 
@@ -604,7 +608,13 @@ public class DomXmpParser
         }
         // Instantiate abstract structured type with hint from first element
         Element first = elements.get(0);
+        nsFinder.push(first);
         PropertyType ctype = checkPropertyDefinition(xmp, DomHelper.getQName(first));
+        if (ctype == null)
+        {
+            throw new XmpParsingException(ErrorType.NoType, "ctype is null, first: " + first + 
+                    ", DomHelper.getQName(first): " + DomHelper.getQName(first));
+        }
         Types tt = ctype.type();
         AbstractStructuredType ast = instanciateStructured(tm, tt, descriptor.getLocalPart(), first.getNamespaceURI());
 
@@ -682,6 +692,7 @@ public class DomXmpParser
             }
 
         }
+        nsFinder.pop();
         return ast;
     }
 
@@ -701,7 +712,7 @@ public class DomXmpParser
         while (tokens.hasMoreTokens())
         {
             String token = tokens.nextToken();
-            if (!token.endsWith("\"") && !token.endsWith("\'"))
+            if (!token.endsWith("\"") && !token.endsWith("'"))
             {
                 throw new XmpParsingException(ErrorType.XpacketBadStart, "Cannot understand PI data part : '" + token
                         + "' in '" + data + "'");
@@ -772,26 +783,35 @@ public class DomXmpParser
 
     private Element findDescriptionsParent(Element root) throws XmpParsingException
     {
-        // always <x:xmpmeta xmlns:x="adobe:ns:meta/">
-        expectNaming(root, "adobe:ns:meta/", "x", "xmpmeta");
-        // should only have one child
-        NodeList nl = root.getChildNodes();
-        if (nl.getLength() == 0)
+        Element rdfRdf;
+        // check if already rdf element, as xmpmeta wrapper can be optional
+        if (!XmpConstants.RDF_NAMESPACE.equals(root.getNamespaceURI()))
         {
-            // empty description
-            throw new XmpParsingException(ErrorType.Format, "No rdf description found in xmp");
+            // always <x:xmpmeta xmlns:x="adobe:ns:meta/">
+            expectNaming(root, "adobe:ns:meta/", "x", "xmpmeta");
+            // should only have one child
+            NodeList nl = root.getChildNodes();
+            if (nl.getLength() == 0)
+            {
+                // empty description
+                throw new XmpParsingException(ErrorType.Format, "No rdf description found in xmp");
+            }
+            else if (nl.getLength() > 1)
+            {
+                // only expect one element
+                throw new XmpParsingException(ErrorType.Format, "More than one element found in x:xmpmeta");
+            }
+            else if (!(root.getFirstChild() instanceof Element))
+            {
+                // should be an element
+                throw new XmpParsingException(ErrorType.Format, "x:xmpmeta does not contains rdf:RDF element");
+            } // else let's parse
+            rdfRdf = (Element) root.getFirstChild();
         }
-        else if (nl.getLength() > 1)
+        else
         {
-            // only expect one element
-            throw new XmpParsingException(ErrorType.Format, "More than one element found in x:xmpmeta");
+            rdfRdf = root;
         }
-        else if (!(root.getFirstChild() instanceof Element))
-        {
-            // should be an element
-            throw new XmpParsingException(ErrorType.Format, "x:xmpmeta does not contains rdf:RDF element");
-        } // else let's parse
-        Element rdfRdf = (Element) root.getFirstChild();
         // always <rdf:RDF
         // xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
         expectNaming(rdfRdf, XmpConstants.RDF_NAMESPACE, XmpConstants.DEFAULT_RDF_PREFIX,
@@ -827,11 +847,11 @@ public class DomXmpParser
      */
     private void removeComments(Node root)
     {
-    	// will hold the nodes which are to be deleted
-    	List<Node> forDeletion = new ArrayList<>();
-    	
-    	NodeList nl = root.getChildNodes();
-    	
+        // will hold the nodes which are to be deleted
+        List<Node> forDeletion = new ArrayList<>();
+        
+        NodeList nl = root.getChildNodes();
+        
         if (nl.getLength()<=1) 
         {
             // There is only one node so we do not remove it
@@ -844,15 +864,15 @@ public class DomXmpParser
             if (node instanceof Comment)
             {
                 // comments to be deleted
-            	forDeletion.add(node);
+                forDeletion.add(node);
             }
             else if (node instanceof Text)
             {
                 if (node.getTextContent().trim().isEmpty())
                 {
-                	// TODO: verify why this is necessary
-                	// empty text nodes to be deleted
-                	forDeletion.add(node);
+                    // TODO: verify why this is necessary
+                    // empty text nodes to be deleted
+                    forDeletion.add(node);
                 }
             }
             else if (node instanceof Element)

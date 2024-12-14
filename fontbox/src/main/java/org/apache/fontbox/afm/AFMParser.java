@@ -661,9 +661,33 @@ public class AFMParser
             String nextCommand = metricsTokenizer.nextToken();
             switch (nextCommand)
             {
+            // top 5 most used first
             case CHARMETRICS_C:
                 String charCodeC = metricsTokenizer.nextToken();
                 charMetric.setCharacterCode(parseInt(charCodeC));
+                verifySemicolon(metricsTokenizer);
+                break;
+            case CHARMETRICS_WX:
+                charMetric.setWx(parseFloat(metricsTokenizer.nextToken()));
+                verifySemicolon(metricsTokenizer);
+                break;
+            case CHARMETRICS_N:
+                charMetric.setName(metricsTokenizer.nextToken());
+                verifySemicolon(metricsTokenizer);
+                break;
+            case CHARMETRICS_B:
+                BoundingBox box = new BoundingBox();
+                box.setLowerLeftX(parseFloat(metricsTokenizer.nextToken()));
+                box.setLowerLeftY(parseFloat(metricsTokenizer.nextToken()));
+                box.setUpperRightX(parseFloat(metricsTokenizer.nextToken()));
+                box.setUpperRightY(parseFloat(metricsTokenizer.nextToken()));
+                charMetric.setBoundingBox(box);
+                verifySemicolon(metricsTokenizer);
+                break;
+            case CHARMETRICS_L:
+                Ligature lig = new Ligature(metricsTokenizer.nextToken(),
+                        metricsTokenizer.nextToken());
+                charMetric.addLigature(lig);
                 verifySemicolon(metricsTokenizer);
                 break;
             case CHARMETRICS_CH:
@@ -671,10 +695,6 @@ public class AFMParser
                 // unclear, wait and see if it breaks anything.
                 String charCodeCH = metricsTokenizer.nextToken();
                 charMetric.setCharacterCode(parseInt(charCodeCH, BITS_IN_HEX));
-                verifySemicolon(metricsTokenizer);
-                break;
-            case CHARMETRICS_WX:
-                charMetric.setWx(parseFloat(metricsTokenizer.nextToken()));
                 verifySemicolon(metricsTokenizer);
                 break;
             case CHARMETRICS_W0X:
@@ -723,25 +743,6 @@ public class AFMParser
                 vv[0] = parseFloat(metricsTokenizer.nextToken());
                 vv[1] = parseFloat(metricsTokenizer.nextToken());
                 charMetric.setVv(vv);
-                verifySemicolon(metricsTokenizer);
-                break;
-            case CHARMETRICS_N:
-                charMetric.setName(metricsTokenizer.nextToken());
-                verifySemicolon(metricsTokenizer);
-                break;
-            case CHARMETRICS_B:
-                BoundingBox box = new BoundingBox();
-                box.setLowerLeftX(parseFloat(metricsTokenizer.nextToken()));
-                box.setLowerLeftY(parseFloat(metricsTokenizer.nextToken()));
-                box.setUpperRightX(parseFloat(metricsTokenizer.nextToken()));
-                box.setUpperRightY(parseFloat(metricsTokenizer.nextToken()));
-                charMetric.setBoundingBox(box);
-                verifySemicolon(metricsTokenizer);
-                break;
-            case CHARMETRICS_L:
-                Ligature lig = new Ligature(metricsTokenizer.nextToken(),
-                        metricsTokenizer.nextToken());
-                charMetric.addLigature(lig);
                 verifySemicolon(metricsTokenizer);
                 break;
             default:
@@ -913,10 +914,9 @@ public class AFMParser
      *
      * @return true If the character is whitespace as defined by the AFM spec.
      */
-    private boolean isEOL( int character )
+    private static boolean isEOL( int character )
     {
-        return character == 0x0D ||
-               character == 0x0A;
+        return character == 0x0D || character == 0x0A;
     }
 
     /**
@@ -926,11 +926,17 @@ public class AFMParser
      *
      * @return true If the character is whitespace as defined by the AFM spec.
      */
-    private boolean isWhitespace( int character )
+    private static boolean isWhitespace( int character )
     {
-        return character == ' ' ||
-               character == '\t' ||
-               character == 0x0D ||
-               character == 0x0A;
+        switch (character)
+        {
+        case ' ':
+        case '\t':
+        case 0x0D:
+        case 0x0A:
+            return true;
+        default:
+            return false;
+        }
     }
 }

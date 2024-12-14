@@ -38,8 +38,8 @@ import java.util.List;
 
 import javax.imageio.ImageIO;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
 import org.apache.pdfbox.cos.COSArray;
 import org.apache.pdfbox.cos.COSBase;
 import org.apache.pdfbox.cos.COSDictionary;
@@ -49,7 +49,6 @@ import org.apache.pdfbox.cos.COSObject;
 import org.apache.pdfbox.cos.COSStream;
 import org.apache.pdfbox.filter.DecodeOptions;
 import org.apache.pdfbox.filter.DecodeResult;
-import org.apache.pdfbox.io.IOUtils;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDResources;
 import org.apache.pdfbox.pdmodel.common.PDMetadata;
@@ -72,13 +71,18 @@ public final class PDImageXObject extends PDXObject implements PDImage
     /**
      * Log instance.
      */
-    private static final Log LOG = LogFactory.getLog(PDImageXObject.class);
+    private static final Logger LOG = LogManager.getLogger(PDImageXObject.class);
 
     private SoftReference<BufferedImage> cachedImage;
     private PDColorSpace colorSpace;
 
     // initialize to MAX_VALUE as we prefer lower subsampling when keeping/replacing cache.
     private int cachedImageSubsampling = Integer.MAX_VALUE;
+    // indicates whether this image has an JPX-based filter applied
+    private boolean hasJPXFilter = false;
+    // is set to true after reading some values from a JPX-based image
+    private boolean jpxValuesInitialized = false;
+    private BufferedImage jpxSMask = null;
 
     /**
      * current resource dictionary (has color spaces)
@@ -91,9 +95,8 @@ public final class PDImageXObject extends PDXObject implements PDImage
      * }.
      *
      * @param document the current document
-     * @throws java.io.IOException if there is an error creating the XObject.
      */
-    public PDImageXObject(PDDocument document) throws IOException
+    public PDImageXObject(PDDocument document)
     {
         this(new PDStream(document), null);
     }
@@ -133,21 +136,15 @@ public final class PDImageXObject extends PDXObject implements PDImage
      *
      * @param stream the XObject stream to read
      * @param resources the current resources
-     * @throws java.io.IOException if there is an error creating the XObject.
      */
-    public PDImageXObject(PDStream stream, PDResources resources) throws IOException
+    public PDImageXObject(PDStream stream, PDResources resources)
     {
         super(stream, COSName.IMAGE);
         this.resources = resources;
         List<COSName> filters = stream.getFilters();
         if (!filters.isEmpty() && COSName.JPX_DECODE.equals(filters.get(filters.size() - 1)))
         {
-            try (COSInputStream is = stream.createInputStream())
-            {
-                DecodeResult decodeResult = is.getDecodeResult();
-                stream.getCOSObject().addAll(decodeResult.getParameters());
-                this.colorSpace = decodeResult.getJPXColorSpace();
-            }
+            hasJPXFilter = true;
         }
     }
 
@@ -155,9 +152,8 @@ public final class PDImageXObject extends PDXObject implements PDImage
      * Creates a thumbnail Image XObject from the given COSBase and name.
      * @param cosStream the COS stream
      * @return an XObject
-     * @throws IOException if there is an error creating the XObject.
      */
-    public static PDImageXObject createThumbnail(COSStream cosStream) throws IOException
+    public static PDImageXObject createThumbnail(COSStream cosStream)
     {
         // thumbnails are special, any non-null subtype is treated as being "Image"
         PDStream pdStream = new PDStream(cosStream);
@@ -173,7 +169,7 @@ public final class PDImageXObject extends PDXObject implements PDImage
         COSStream stream = document.getDocument().createCOSStream();
         try (OutputStream output = stream.createRawOutputStream())
         {
-            IOUtils.copy(rawInput, output);
+            rawInput.transferTo(output);
         }
         return stream;
     }
@@ -290,14 +286,14 @@ public final class PDImageXObject extends PDXObject implements PDImage
             throw new IllegalArgumentException("Image type not supported: " + file.getName());
         }
 
-        if (fileType.equals(FileType.JPEG))
+        if (fileType == FileType.JPEG)
         {
             try (FileInputStream fis = new FileInputStream(file))
             {
                 return JPEGFactory.createFromStream(doc, fis);
             }
         }
-        if (fileType.equals(FileType.TIFF))
+        if (fileType == FileType.TIFF)
         {
             try
             {
@@ -312,7 +308,7 @@ public final class PDImageXObject extends PDXObject implements PDImage
                 fileType = FileType.PNG;
             }
         }
-        if (fileType.equals(FileType.BMP) || fileType.equals(FileType.GIF) || fileType.equals(FileType.PNG))
+        if (fileType == FileType.BMP || fileType == FileType.GIF || fileType == FileType.PNG)
         {
             BufferedImage bim = ImageIO.read(file);
             return LosslessFactory.createFromImage(doc, bim);
@@ -350,11 +346,11 @@ public final class PDImageXObject extends PDXObject implements PDImage
             throw new IllegalArgumentException("Image type not supported: " + name);
         }
 
-        if (fileType.equals(FileType.JPEG))
+        if (fileType == FileType.JPEG)
         {
             return JPEGFactory.createFromByteArray(document, byteArray);
         }
-        if (fileType.equals(FileType.PNG))
+        if (fileType == FileType.PNG)
         {
             // Try to directly convert the image without recoding it.
             PDImageXObject image = PNGConverter.convertPNGImage(document, byteArray);
@@ -363,7 +359,7 @@ public final class PDImageXObject extends PDXObject implements PDImage
                 return image;
             }
         }
-        if (fileType.equals(FileType.TIFF))
+        if (fileType == FileType.TIFF)
         {
             try
             {
@@ -378,7 +374,7 @@ public final class PDImageXObject extends PDXObject implements PDImage
                 fileType = FileType.PNG;
             }
         }
-        if (fileType.equals(FileType.BMP) || fileType.equals(FileType.GIF) || fileType.equals(FileType.PNG))
+        if (fileType == FileType.BMP || fileType == FileType.GIF || fileType == FileType.PNG)
         {
             ByteArrayInputStream bais = new ByteArrayInputStream(byteArray);
             BufferedImage bim = ImageIO.read(bais);
@@ -453,13 +449,20 @@ public final class PDImageXObject extends PDXObject implements PDImage
                 return cached;
             }
         }
-
+        initJPXValues();
         // get RGB image w/o reference because applyMask might modify it, take long time and a lot of memory. 
         final BufferedImage image;
         final PDImageXObject softMask = getSoftMask();
         final PDImageXObject mask = getMask();
+        if (jpxSMask != null)
+        {
+            // PDFBOX-5657: handle JPEG2000 SMaskInData
+            image = applyMask(SampledImageReader.getRGBImage(this, region, subsampling, getColorKeyMask()),
+                    jpxSMask, false, true,
+                    null);
+        }
         // soft mask (overrides explicit mask)
-        if (softMask != null)
+        else if (softMask != null)
         {
             image = applyMask(SampledImageReader.getRGBImage(this, region, subsampling, getColorKeyMask()),
                     softMask.getOpaqueImage(region, subsampling), softMask.getInterpolate(), true,
@@ -698,6 +701,35 @@ public final class PDImageXObject extends PDXObject implements PDImage
         return color < 0 ? 0 : color > 255 ? 255 : color;
     }
 
+    private void initJPXValues()
+    {
+        if (!hasJPXFilter || jpxValuesInitialized)
+        {
+            return;
+        }
+        // some of the dictionary values of the COSStream may be overwritten by values which are extracted from the
+        // image itself, such as
+        // width and height of the image
+        // bits per component
+        // the colorspace of the image is used if the dictionary doesn't provide any value
+        PDStream stream = getStream();
+        try (COSInputStream is = stream.createInputStream())
+        {
+            DecodeResult decodeResult = is.getDecodeResult();
+            stream.getCOSObject().addAll(decodeResult.getParameters());
+            if (colorSpace == null)
+            {
+                colorSpace = decodeResult.getJPXColorSpace();
+            }
+            jpxSMask = decodeResult.getJPXSMask();
+            jpxValuesInitialized = true;
+        }
+        catch (IOException exception)
+        {
+            LOG.debug("Can't initialize JPX based values", exception);
+        }
+    }
+
     /**
      * High-quality image scaling.
      */
@@ -798,6 +830,7 @@ public final class PDImageXObject extends PDXObject implements PDImage
         }
         else
         {
+            initJPXValues();
             return getCOSObject().getInt(COSName.BITS_PER_COMPONENT, COSName.BPC);
         }
     }
@@ -838,9 +871,13 @@ public final class PDImageXObject extends PDXObject implements PDImage
             else if (isStencil())
             {
                 // stencil mask color space must be gray, it is often missing
-                return PDDeviceGray.INSTANCE;
+                colorSpace = PDDeviceGray.INSTANCE;
             }
             else
+            {
+                initJPXValues();
+            }
+            if (colorSpace == null)
             {
                 // an image without a color space is always broken
                 throw new IOException("could not determine color space");
@@ -884,6 +921,7 @@ public final class PDImageXObject extends PDXObject implements PDImage
     @Override
     public int getHeight()
     {
+        initJPXValues();
         return getCOSObject().getInt(COSName.HEIGHT);
     }
 
@@ -896,6 +934,7 @@ public final class PDImageXObject extends PDXObject implements PDImage
     @Override
     public int getWidth()
     {
+        initJPXValues();
         return getCOSObject().getInt(COSName.WIDTH);
     }
 
@@ -978,7 +1017,7 @@ public final class PDImageXObject extends PDXObject implements PDImage
         }
         else
         {
-            LOG.warn("getSuffix() returns null, filters: " + filters);
+            LOG.warn("getSuffix() returns null, filters: {}", filters);
             return null;
         }
     }

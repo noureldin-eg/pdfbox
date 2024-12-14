@@ -18,12 +18,13 @@ package org.apache.pdfbox.pdmodel.documentinterchange.logicalstructure;
 
 import java.io.IOException;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
 
 import org.apache.pdfbox.cos.COSDictionary;
 import org.apache.pdfbox.cos.COSName;
 import org.apache.pdfbox.cos.COSStream;
+import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.common.COSObjectable;
 import org.apache.pdfbox.pdmodel.graphics.PDXObject;
 import org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotation;
@@ -41,7 +42,7 @@ public class PDObjectReference implements COSObjectable
     /**
      * Log instance.
      */
-    private static final Log LOG = LogFactory.getLog(PDObjectReference.class);
+    private static final Logger LOG = LogManager.getLogger(PDObjectReference.class);
 
     /**
      * TYPE of this object.
@@ -146,4 +147,30 @@ public class PDObjectReference implements COSObjectable
         this.getCOSObject().setItem(COSName.OBJ, xobject);
     }
 
+    /**
+     * Get the page on which the object shall be rendered.
+     *
+     * @return the referenced page or null.
+     */
+    public PDPage getPage()
+    {
+        COSDictionary pageDict = this.getCOSObject().getCOSDictionary(COSName.PG);
+        if (pageDict != null)
+        {
+            return new PDPage(pageDict);
+        }
+        return null;
+    }
+
+    /**
+     * Sets the page on which the object shall be rendered. This is optional and overrides the /PG
+     * entry in the structure element containing the object reference; shall be used if the
+     * structure element contained no such entry.
+     *
+     * @param page
+     */
+    public void setPage(PDPage page)
+    {
+        this.getCOSObject().setItem(COSName.PG, page);
+    }
 }

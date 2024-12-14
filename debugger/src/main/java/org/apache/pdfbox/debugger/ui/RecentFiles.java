@@ -97,10 +97,7 @@ public class RecentFiles
      */
     public void removeFile(String path)
     {
-        if (filePaths.contains(path))
-        {
-            filePaths.remove(path);
-        }
+        filePaths.remove(path);
     }
 
     /**
@@ -145,12 +142,12 @@ public class RecentFiles
         int endIndex = 0;
         while (remainingLength > 0)
         {
-            endIndex += remainingLength >= allowedStringLength ? allowedStringLength : remainingLength;
+            endIndex += Math.min(remainingLength, allowedStringLength);
             pieces.add(fullPath.substring(beginIndex, endIndex));
             beginIndex = endIndex;
             remainingLength = fullPath.length() - endIndex;
         }
-        return pieces.toArray(new String[pieces.size()]);
+        return pieces.toArray(String[]::new);
     }
 
     private void writeHistoryToPref(Queue<String> filePaths)

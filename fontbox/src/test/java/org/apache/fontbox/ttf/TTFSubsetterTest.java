@@ -207,7 +207,7 @@ class TTFSubsetterTest
     void testPDFBox3379() throws IOException
     {
         TrueTypeFont full = new TTFParser()
-                .parse(new RandomAccessReadBufferedFile("target/pdfs/DejaVuSansMono.ttf"));
+                .parse(new RandomAccessReadBufferedFile("target/fonts/DejaVuSansMono.ttf"));
         TTFSubsetter ttfSubsetter = new TTFSubsetter(full);
         ttfSubsetter.add('A');
         ttfSubsetter.add(' ');
@@ -222,7 +222,7 @@ class TTFSubsetterTest
             assertEquals(1, subset.nameToGID("space"));
             assertEquals(2, subset.nameToGID("A"));
             assertEquals(3, subset.nameToGID("B"));
-            String [] names = new String[]{"A","B","space"};
+            String [] names = {"A","B","space"};
             for (String name : names)
             {
                 assertEquals(full.getAdvanceWidth(full.nameToGID(name)),
@@ -271,6 +271,27 @@ class TTFSubsetterTest
                     "Hair space path should be empty");
             assertFalse(subset.getPath("dieresis.uc").getBounds2D().isEmpty(),
                     "UC dieresis path should not be empty");
+        }
+    }
+
+    /**
+     * Test font with v3 PostScript table format and no glyph names.
+     *
+     * @throws IOException 
+     */
+    @Test
+    void testPDFBox5728() throws IOException
+    {
+        try (TrueTypeFont ttf = new TTFParser().parse(
+                new RandomAccessReadBufferedFile("target/fonts/NotoMono-Regular.ttf")))
+        {
+            PostScriptTable postScript = ttf.getPostScript();
+            assertEquals(3.0, postScript.getFormatType());
+            assertNull(postScript.getGlyphNames());
+            TTFSubsetter subsetter = new TTFSubsetter(ttf);
+            subsetter.add('a');
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            subsetter.writeToStream(output);
         }
     }
 }

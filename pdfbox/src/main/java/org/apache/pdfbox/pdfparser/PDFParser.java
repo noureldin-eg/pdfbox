@@ -20,11 +20,10 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.cos.COSDictionary;
-import org.apache.pdfbox.cos.COSDocument;
 import org.apache.pdfbox.cos.COSName;
 import org.apache.pdfbox.io.IOUtils;
 import org.apache.pdfbox.io.RandomAccessRead;
@@ -34,7 +33,7 @@ import org.apache.pdfbox.pdmodel.encryption.InvalidPasswordException;
 
 public class PDFParser extends COSParser
 {
-    private static final Log LOG = LogFactory.getLog(PDFParser.class);
+    private static final Logger LOG = LogManager.getLogger(PDFParser.class);
 
     /**
      * Constructor.
@@ -92,28 +91,9 @@ public class PDFParser extends COSParser
     public PDFParser(RandomAccessRead source, String decryptionPassword, InputStream keyStore,
             String alias, StreamCacheCreateFunction streamCacheCreateFunction) throws IOException
     {
-        super(source, decryptionPassword, keyStore, alias);
-        init(streamCacheCreateFunction);
+        super(source, decryptionPassword, keyStore, alias, streamCacheCreateFunction);
     }
 
-    private void init(StreamCacheCreateFunction streamCacheCreateFunction)
-    {
-        String eofLookupRangeStr = System.getProperty(SYSPROP_EOFLOOKUPRANGE);
-        if (eofLookupRangeStr != null)
-        {
-            try
-            {
-                setEOFLookupRange(Integer.parseInt(eofLookupRangeStr));
-            }
-            catch (NumberFormatException nfe)
-            {
-                LOG.warn("System property " + SYSPROP_EOFLOOKUPRANGE
-                        + " does not contain an integer value, but: '" + eofLookupRangeStr + "'");
-            }
-        }
-        document = new COSDocument(streamCacheCreateFunction, this);
-    }
-    
     /**
      * The initial parse will first parse only the trailer, the xrefstart and all xref tables to have a pointer (offset)
      * to all the pdf's objects. It can handle linearized pdfs, which will have an xref at the end pointing to an xref
@@ -176,7 +156,14 @@ public class PDFParser extends COSParser
             // PDFBOX-1922 read the version header and rewind
             if (!parsePDFHeader() && !parseFDFHeader())
             {
-                throw new IOException( "Error: Header doesn't contain versioninfo" );
+                if (lenient)
+                {
+                    LOG.warn("Error: Header doesn't contain versioninfo");
+                }
+                else
+                {
+                    throw new IOException("Error: Header doesn't contain versioninfo");
+                }
             }
     
             if (!initialParseDone)

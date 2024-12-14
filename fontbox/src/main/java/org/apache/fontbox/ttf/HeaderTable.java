@@ -20,8 +20,8 @@ import java.io.IOException;
 import java.util.Calendar;
 
 /**
- * A table in a true type font.
- * 
+ * This 'head'-table is a required table in a TrueType font.
+ *
  * @author Ben Litchfield
  */
 public class HeaderTable extends TTFTable
@@ -40,7 +40,7 @@ public class HeaderTable extends TTFTable
      * Italic macStyle flag.
      */
     public static final int MAC_STYLE_ITALIC = 2;
-    
+
     private float version;
     private float fontRevision;
     private long checkSumAdjustment;
@@ -64,9 +64,19 @@ public class HeaderTable extends TTFTable
         super();
     }
 
+    /** {@inheritDoc} */
+    @Override
+    void readHeaders(TrueTypeFont ttf, TTFDataStream data, FontHeaders outHeaders) throws IOException
+    {
+        // 44 == 4 + 4 + 4 + 4 + 2 + 2 + 2*8 + 4*2, see read()
+        data.seek(data.getCurrentPosition() + 44);
+        macStyle = data.readUnsignedShort();
+        outHeaders.setHeaderMacStyle(macStyle);
+    }
+
     /**
      * This will read the required data from the stream.
-     * 
+     *
      * @param ttf The font that is being read.
      * @param data The stream to read the data from.
      * @throws IOException If there is an error reading the data.

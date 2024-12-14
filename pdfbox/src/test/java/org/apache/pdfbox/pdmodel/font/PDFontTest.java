@@ -270,14 +270,15 @@ class PDFontTest
     /**
      * Test using broken Type1C font.
      *
-     * @throws IOException 
+     * @throws IOException
+     * @throws URISyntaxException
      */
     @Test
-    void testPDFox5048() throws IOException
+    void testPDFox5048() throws IOException, URISyntaxException
     {
         try (PDDocument doc = Loader.loadPDF(RandomAccessReadBuffer.createBufferFromStream(
-                new URL("https://issues.apache.org/jira/secure/attachment/13017227/stringwidth.pdf")
-                        .openStream())))
+                new URI("https://issues.apache.org/jira/secure/attachment/13017227/stringwidth.pdf")
+                        .toURL().openStream())))
         {
             PDPage page = doc.getPage(0);
             PDFont font = page.getResources().getFont(COSName.getPDFName("F70"));
@@ -459,6 +460,43 @@ class PDFontTest
             GeneralPath path2 = tr.getPath(248);
             assertFalse(path2.getPathIterator(null).isDone()); // not empty
             assertTrue(new Area(path1).equals(new Area(path2))); // assertEquals does not test equals()
+        }
+    }
+
+    /**
+     * Check space width.
+     *
+     * @throws IOException 
+     */
+    @Test
+    void PDFBOX5920Type0() throws IOException
+    {
+        try (InputStream is = 
+                PDFontTest.class.getResourceAsStream("/org/apache/pdfbox/resources/ttf/LiberationSans-Regular.ttf");
+                PDDocument document = new PDDocument())
+        {
+            PDFont font = PDType0Font.load(document, is, false);
+            assertEquals(20064.0f, font.getStringWidth("The quick brown fox jumps over the lazy dog."));
+            assertEquals(278.0f, font.getSpaceWidth());
+        }
+    }
+
+    /**
+     * Check space width.
+     *
+     * @throws IOException 
+     */
+    @Test
+    void PDFBOX5920TrueType() throws IOException
+    {
+        try (InputStream is = 
+                PDFontTest.class.getResourceAsStream("/org/apache/pdfbox/resources/ttf/LiberationSans-Regular.ttf");
+                PDDocument document = new PDDocument())
+        {
+            PDFont font = PDTrueTypeFont.load(document, is, WinAnsiEncoding.INSTANCE);
+            assertEquals(20064.0f, 
+                    font.getStringWidth("The quick brown fox jumps over the lazy dog."));
+            assertEquals(278.0f, font.getSpaceWidth());
         }
     }
 }

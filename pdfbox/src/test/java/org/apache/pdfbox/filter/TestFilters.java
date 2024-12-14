@@ -16,19 +16,21 @@
  */
 package org.apache.pdfbox.filter;
 
-import static org.junit.jupiter.api.Assertions.assertArrayEquals;
-
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
+import java.util.ArrayList;
 
 import java.util.Random;
 
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.cos.COSDictionary;
 import org.apache.pdfbox.cos.COSName;
-import org.apache.pdfbox.io.IOUtils;
+
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -142,7 +144,8 @@ class TestFilters
     void testPDFBOX1977() throws IOException
     {
         Filter lzwFilter = FilterFactory.INSTANCE.getFilter(COSName.LZW_DECODE);
-        byte[] byteArray = IOUtils.toByteArray(this.getClass().getResourceAsStream("PDFBOX-1977.bin"));
+        InputStream in = this.getClass().getResourceAsStream("PDFBOX-1977.bin");
+        byte[] byteArray = in.readAllBytes();
         checkEncodeDecode(lzwFilter, byteArray);
     }
 
@@ -158,7 +161,7 @@ class TestFilters
         Filter rleFilter = FilterFactory.INSTANCE.getFilter(COSName.RUN_LENGTH_DECODE);
         byte[] input0 = new byte[0];
         checkEncodeDecode(rleFilter, input0);
-        byte[] input1 = new byte[] { 1, 2, 3, 4, 5, (byte) 128, (byte) 140, (byte) 180, (byte) 0xFF};
+        byte[] input1 = { 1, 2, 3, 4, 5, (byte) 128, (byte) 140, (byte) 180, (byte) 0xFF};
         checkEncodeDecode(rleFilter, input1);
         byte[] input2 = new byte[10];
         checkEncodeDecode(rleFilter, input2);
@@ -170,10 +173,19 @@ class TestFilters
         checkEncodeDecode(rleFilter, input5);
         byte[] input6 = new byte[1];
         checkEncodeDecode(rleFilter, input6);
-        byte[] input7 = new byte[] {1, 2};
+        byte[] input7 = {1, 2};
         checkEncodeDecode(rleFilter, input7);
         byte[] input8 = new byte[2];
         checkEncodeDecode(rleFilter, input8);
+    }
+
+    @Test
+    void testEmptyFilterList() throws Exception
+    {
+        assertThrows(IllegalArgumentException.class, () ->
+        {
+            Filter.decode(null, new ArrayList<>(), new COSDictionary(), null, null);
+        });
     }
 
     private void checkEncodeDecode(Filter filter, byte[] original) throws IOException

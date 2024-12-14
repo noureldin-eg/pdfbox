@@ -22,8 +22,8 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import javax.swing.JPanel;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
 import org.apache.pdfbox.pdmodel.font.PDSimpleFont;
 import org.apache.pdfbox.pdmodel.font.PDVectorFont;
 
@@ -33,7 +33,7 @@ import org.apache.pdfbox.pdmodel.font.PDVectorFont;
  */
 class SimpleFont extends FontPane
 {
-    private static final Log LOG = LogFactory.getLog(SimpleFont.class);
+    private static final Logger LOG = LogManager.getLogger(SimpleFont.class);
 
     public static final String NO_GLYPH = "None";
     private final FontEncodingView view;
@@ -55,6 +55,7 @@ class SimpleFont extends FontPane
         attributes.put("Encoding", getEncodingName(font));
         attributes.put("Glyphs", Integer.toString(totalAvailableGlyph));
         attributes.put("Standard 14", Boolean.toString(font.isStandard14()));
+        attributes.put("Embedded", Boolean.toString(font.isEmbedded()));
 
         view = new FontEncodingView(tableData, attributes, 
                 new String[] {"Code", "Glyph Name", "Unicode Character", "Glyph"}, yBounds);
@@ -67,11 +68,17 @@ class SimpleFont extends FontPane
         for (int index = 0; index <= 255; index++)
         {
             glyphs[index][0] = index;
-            if (font.getEncoding().contains(index) || font.toUnicode(index) != null)
+            String unicode = font.toUnicode(index);
+            if (unicode == null)
+            {
+                // this mirrors the workaround for PDSimpleFont in LegacyPDFStreamEngine
+                unicode = String.valueOf((char) index);
+            }
+            if (font.getEncoding().contains(index) || unicode != null)
             {
                 String glyphName = font.getEncoding().getName(index);
                 glyphs[index][1] = glyphName;
-                glyphs[index][2] = font.toUnicode(index);
+                glyphs[index][2] = unicode;
                 try
                 {
                     // using names didn't work with the file from PDFBOX-3445

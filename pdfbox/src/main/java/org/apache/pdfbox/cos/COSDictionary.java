@@ -29,13 +29,11 @@ import java.util.Map.Entry;
 import java.util.Set;
 import java.util.function.BiConsumer;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
 
-import org.apache.pdfbox.io.IOUtils;
 import org.apache.pdfbox.pdmodel.common.COSObjectable;
 import org.apache.pdfbox.util.DateConverter;
-import org.apache.pdfbox.util.SmallMap;
 
 /**
  * This class represents a dictionary where name/value pairs reside.
@@ -49,15 +47,14 @@ public class COSDictionary extends COSBase implements COSUpdateInfo
     /**
      * Log instance.
      */
-    private static final Log LOG = LogFactory.getLog(COSDictionary.class);
+    private static final Logger LOG = LogManager.getLogger(COSDictionary.class);
 
     private static final String PATH_SEPARATOR = "/";
-    private static final int MAP_THRESHOLD = 1000;
 
     /**
      * The name-value pairs of this dictionary. The pairs are kept in the order they were added to the dictionary.
      */
-    protected Map<COSName, COSBase> items = new SmallMap<>();
+    protected Map<COSName, COSBase> items = new LinkedHashMap<>();
     private final COSUpdateState updateState;
 
     /**
@@ -206,12 +203,18 @@ public class COSDictionary extends COSBase implements COSUpdateInfo
         }
         else
         {
-            if (items instanceof SmallMap && items.size() >= MAP_THRESHOLD)
+            if ((value instanceof COSDictionary || value instanceof COSArray) && !value.isDirect()
+                    && value.getKey() != null)
             {
-                items = new LinkedHashMap<>(items);
+                COSObject cosObject = new COSObject(value, value.getKey());
+                items.put(key, cosObject);
+                getUpdateState().update(cosObject);
             }
-            items.put(key, value);
-            getUpdateState().update(value);
+            else
+            {
+                items.put(key, value);
+                getUpdateState().update(value);
+            }
         }
     }
 
@@ -1273,10 +1276,6 @@ public class COSDictionary extends COSBase implements COSUpdateInfo
      */
     public void addAll(COSDictionary dict)
     {
-        if (items instanceof SmallMap && items.size() + dict.items.size() >= MAP_THRESHOLD)
-        {
-            items = new LinkedHashMap<>(items);
-        }
         items.putAll(dict.items);
     }
 
@@ -1364,11 +1363,11 @@ public class COSDictionary extends COSBase implements COSUpdateInfo
         if (objs.contains(base))
         {
             // avoid endless recursion
-            return String.valueOf(base.hashCode());
+            return "hash:" + base.hashCode();
         }
-        objs.add(base);
         if (base instanceof COSDictionary)
         {
+            objs.add(base);
             StringBuilder sb = new StringBuilder("COSDictionary{");
             for (Map.Entry<COSName, COSBase> x : ((COSDictionary) base).entrySet())
             {
@@ -1382,7 +1381,7 @@ public class COSDictionary extends COSBase implements COSUpdateInfo
             {
                 try (InputStream stream = ((COSStream) base).createRawInputStream())
                 {
-                    byte[] b = IOUtils.toByteArray(stream);
+                    byte[] b = stream.readAllBytes();
                     sb.append("COSStream{").append(Arrays.hashCode(b)).append("}");
                 }
             }
@@ -1390,6 +1389,7 @@ public class COSDictionary extends COSBase implements COSUpdateInfo
         }
         if (base instanceof COSArray)
         {
+            objs.add(base);
             StringBuilder sb = new StringBuilder("COSArray{");
             for (COSBase x : (COSArray) base)
             {
@@ -1401,6 +1401,7 @@ public class COSDictionary extends COSBase implements COSUpdateInfo
         }
         if (base instanceof COSObject)
         {
+            objs.add(base);
             COSObject obj = (COSObject) base;
             return "COSObject{"
                     + getDictionaryString(
@@ -1428,10 +1429,10 @@ public class COSDictionary extends COSBase implements COSUpdateInfo
      * 
      * Expert use only. You might run into an endless recursion if choosing a wrong starting point.
      * 
-     * @param indirectObjects a list of already found indirect objects.
+     * @param indirectObjects a collection of already found indirect objects.
      * 
      */
-    public void getIndirectObjectKeys(List<COSObjectKey> indirectObjects)
+    public void getIndirectObjectKeys(Collection<COSObjectKey> indirectObjects)
     {
         if (indirectObjects == null)
         {
@@ -1453,7 +1454,7 @@ public class COSDictionary extends COSBase implements COSUpdateInfo
         for (Entry<COSName, COSBase> entry : items.entrySet())
         {
             COSBase cosBase = entry.getValue();
-            COSObjectKey cosBaseKey = cosBase.getKey();
+            COSObjectKey cosBaseKey = cosBase != null ? cosBase.getKey() : null;
             // avoid endless recursions
             if (COSName.PARENT.equals(entry.getKey())
                     || (cosBaseKey != null && indirectObjects.contains(cosBaseKey)))
@@ -1463,19 +1464,9 @@ public class COSDictionary extends COSBase implements COSUpdateInfo
             if (cosBase instanceof COSObject)
             {
                 // dereference object
-                COSBase referencedObject = ((COSObject) cosBase).getObject();
-                if (referencedObject instanceof COSDictionary)
-                {
-                    // descend to included dictionary to collect all included indirect objects
-                    ((COSDictionary) referencedObject).getIndirectObjectKeys(indirectObjects);
-                }
-                else if (referencedObject instanceof COSArray)
-                {
-                    // descend to included array to collect all included indirect objects
-                    ((COSArray) referencedObject).getIndirectObjectKeys(indirectObjects);
-                }
+                cosBase = ((COSObject) cosBase).getObject();
             }
-            else if (cosBase instanceof COSDictionary)
+            if (cosBase instanceof COSDictionary)
             {
                 // descend to included dictionary to collect all included indirect objects
                 ((COSDictionary) cosBase).getIndirectObjectKeys(indirectObjects);
@@ -1484,6 +1475,11 @@ public class COSDictionary extends COSBase implements COSUpdateInfo
             {
                 // descend to included array to collect all included indirect objects
                 ((COSArray) cosBase).getIndirectObjectKeys(indirectObjects);
+            }
+            else if (cosBaseKey != null)
+            {
+                // add key for all indirect objects other than COSDictionary/COSArray
+                indirectObjects.add(cosBaseKey);
             }
         }
     }

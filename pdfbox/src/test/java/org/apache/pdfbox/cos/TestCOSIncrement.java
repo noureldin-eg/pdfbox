@@ -42,12 +42,27 @@ import static org.junit.jupiter.api.Assertions.fail;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
+
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.net.URL;
+
 import java.util.ConcurrentModificationException;
+
+import org.apache.pdfbox.pdmodel.font.PDFont;
+import org.apache.pdfbox.pdmodel.font.PDType0Font;
+
+import org.junit.jupiter.api.BeforeAll;
 
 class TestCOSIncrement
 {
+    @BeforeAll
+    static void init()
+    {
+        new File("target/test-output").mkdirs();
+    }
 
     // TODO Very basic and primitive test - add in depth testing for all this.
     /**
@@ -253,12 +268,13 @@ class TestCOSIncrement
      * YTW2VWJQTDAE67PGJT6GS7QSKW3GNUQR.pdf - test that this issues has been resolved.
      * 
      * @throws IOException
+     * @throws URISyntaxException
      */
     @Test
-    void testConcurrentModification() throws IOException
+    void testConcurrentModification() throws IOException, URISyntaxException
     {
         URL pdfLocation = 
-            new URL("https://issues.apache.org/jira/secure/attachment/12891316/YTW2VWJQTDAE67PGJT6GS7QSKW3GNUQR.pdf");
+            new URI("https://issues.apache.org/jira/secure/attachment/12891316/YTW2VWJQTDAE67PGJT6GS7QSKW3GNUQR.pdf").toURL();
         
         try (PDDocument document = Loader
                 .loadPDF(RandomAccessReadBuffer.createBufferFromStream(pdfLocation.openStream())))
@@ -280,4 +296,52 @@ class TestCOSIncrement
         return assertDoesNotThrow(() -> Loader.loadPDF(documentData), "Loading the document failed.");
     }
 
+    /**
+     * Check that subsetting takes place in incremental saving.
+     */
+    @Test
+    void testSubsetting() throws IOException
+    {
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+
+        try (PDDocument document = new PDDocument())
+        {
+            PDPage page = new PDPage(PDRectangle.A4);
+            document.addPage(page);
+            document.save(baos);
+        }
+
+        try (PDDocument document = Loader.loadPDF(baos.toByteArray()))
+        {
+            PDPage page = document.getPage(0);
+
+            PDFont font = PDType0Font.load(document, TestCOSIncrement.class.getResourceAsStream(
+                    "/org/apache/pdfbox/resources/ttf/LiberationSans-Regular.ttf"));
+
+            try (PDPageContentStream contentStream = new PDPageContentStream(document, page))
+            {
+                contentStream.beginText();
+                contentStream.setFont(font, 12);
+                contentStream.newLineAtOffset(75, 750);
+                contentStream.showText("Apache PDFBox");
+                contentStream.endText();
+            }
+
+            COSDictionary catalog = document.getDocumentCatalog().getCOSObject();
+            catalog.setNeedToBeUpdated(true);
+            COSDictionary pages = catalog.getCOSDictionary(COSName.PAGES);
+            pages.setNeedToBeUpdated(true);
+            page.getCOSObject().setNeedToBeUpdated(true);
+
+            document.saveIncremental(new FileOutputStream("target/test-output/PDFBOX-5627.pdf"));
+        }
+
+        try (PDDocument document = Loader.loadPDF(new File("target/test-output/PDFBOX-5627.pdf")))
+        {
+            PDPage page = document.getPage(0);
+            COSName fontName = page.getResources().getFontNames().iterator().next();
+            PDFont font = page.getResources().getFont(fontName);
+            assertTrue(font.isEmbedded());
+        }
+    }
 }

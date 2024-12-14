@@ -58,7 +58,6 @@ import org.apache.pdfbox.cos.COSString;
 import org.apache.pdfbox.cos.COSUpdateInfo;
 import org.apache.pdfbox.cos.ICOSVisitor;
 
-import org.apache.pdfbox.io.IOUtils;
 import org.apache.pdfbox.io.RandomAccessInputStream;
 import org.apache.pdfbox.io.RandomAccessRead;
 import org.apache.pdfbox.pdfparser.PDFXRefStream;
@@ -109,7 +108,7 @@ public class COSWriter implements ICOSVisitor
     /**
      * Garbage bytes used to create the PDF header.
      */
-    public static final byte[] GARBAGE = new byte[] {(byte)0xf6, (byte)0xe4, (byte)0xfc, (byte)0xdf};
+    public static final byte[] GARBAGE = {(byte)0xf6, (byte)0xe4, (byte)0xfc, (byte)0xdf};
     /**
      * The EOF constant.
      */
@@ -183,8 +182,6 @@ public class COSWriter implements ICOSVisitor
 
     // the current object number
     private long number = 0;
-    // indicates whether existing object keys should be reused or not
-    private boolean reuseObjectNumbers = true;
 
     // maps the object to the keys generated in the writer
     // these are used for indirect references in other objects
@@ -272,9 +269,6 @@ public class COSWriter implements ICOSVisitor
         // write to buffer instead of output
         setOutput(new ByteArrayOutputStream());
         setStandardOutput(new COSStandardOutputStream(output, inputData.length()));
-        // don't reuse object numbers to avoid overlapping keys
-        // as inputData already contains a lot of objects
-        reuseObjectNumbers = false;
         // disable compressed object streams
         compressParameters = CompressParameters.NO_COMPRESSION;
         incrementalInput = inputData;
@@ -489,13 +483,13 @@ public class COSWriter implements ICOSVisitor
                 objectKeys.put(object, key);
                 keyObject.put(key, object);
             }
+            number = compressionPool.getHighestXRefObjectNumber();
             for (COSObjectKey key : compressionPool.getTopLevelObjects())
             {
                 currentObjectKey = key;
                 doWriteObject(key, keyObject.get(key));
             }
             // Append object streams to document.
-            number = compressionPool.getHighestXRefObjectNumber();
             for (COSWriterObjectStream finalizedObjectStream : compressionPool
                     .createObjectStreams())
             {
@@ -860,9 +854,12 @@ public class COSWriter implements ICOSVisitor
     private void doWriteIncrement() throws IOException
     {
         // write existing PDF
-        IOUtils.copy(new RandomAccessInputStream(incrementalInput), incrementalOutput);
-        // write the actual incremental update
-        incrementalOutput.write(((ByteArrayOutputStream) output).toByteArray());
+        try (InputStream input = new RandomAccessInputStream(incrementalInput))
+        {
+            input.transferTo(incrementalOutput);
+            // write the actual incremental update
+            incrementalOutput.write(((ByteArrayOutputStream) output).toByteArray());
+        }
     }
     
     private void doWriteSignature() throws IOException
@@ -981,7 +978,8 @@ public class COSWriter implements ICOSVisitor
         System.arraycopy(signatureBytes, 0, incrementPart, incPartSigOffset + 1, signatureBytes.length);
 
         // write the data to the incremental output stream
-        IOUtils.copy(new RandomAccessInputStream(incrementalInput), incrementalOutput);
+        InputStream input = new RandomAccessInputStream(incrementalInput);
+        input.transferTo(incrementalOutput);
         incrementalOutput.write(incrementPart);
 
         // prevent further use
@@ -1058,7 +1056,7 @@ public class COSWriter implements ICOSVisitor
             list.add(last - count + 1);
             list.add(count);
         }
-        return list.toArray(new Long[list.size()]);
+        return list.toArray(Long[]::new);
     }
     
     /**
@@ -1070,44 +1068,60 @@ public class COSWriter implements ICOSVisitor
      */
     private COSObjectKey getObjectKey( COSBase obj )
     {
-        COSBase actual = obj;
-        if( actual instanceof COSObject )
+        COSObjectKey key = obj.getKey();
+        COSBase actual;
+        if (obj instanceof COSObject)
         {
-            if (reuseObjectNumbers)
-            {
-                COSObjectKey key = obj.getKey();
-                if (key != null)
-                {
-                    objectKeys.put(obj, key);
-                    return key;
-                }
-            }
             actual = ((COSObject) obj).getObject();
+            if (actual == null)
+            {
+                // the referenced object isn't there due to a malformed pdf
+                // check if a key is present, otherwise create a new one
+                if (key == null)
+                {
+                    key = new COSObjectKey(++number, 0);
+                }
+                objectKeys.put(obj, key);
+                return key;
+            }
         }
-        // PDFBOX-4540: because objectKeys is accessible from outside, it is possible
-        // that a COSObject obj is already in the objectKeys map.
-        return objectKeys.computeIfAbsent(actual, k -> new COSObjectKey(++number, 0));
+        else
+        {
+            actual = obj;
+        }
+        COSObjectKey actualKey = objectKeys.computeIfAbsent(actual,
+                k -> new COSObjectKey(++number, 0));
+        // check if the returned key and the origin key of the given object are the same
+        if (key == null || (actualKey != null && !key.equals(actualKey)))
+        {
+            // update the object key given object/referenced object
+            key = actualKey;
+            actual.setKey(actualKey);
+            if (obj instanceof COSObject)
+            {
+                // update the object key of the indirect object
+                obj.setKey(key);
+                objectKeys.put(obj, key);
+            }
+        }
+        return key;
     }
 
     @Override
-    public void visitFromArray(COSArray obj) throws IOException
+    public void visitFromArray(COSArray array) throws IOException
     {
         int count = 0;
         getStandardOutput().write(ARRAY_OPEN);
-        for (Iterator<COSBase> i = obj.iterator(); i.hasNext();)
+        for (Iterator<COSBase> i = array.iterator(); i.hasNext();)
         {
             COSBase current = i.next();
             if( current instanceof COSDictionary )
             {
-                if (current.isDirect())
-                {
-                    visitFromDictionary((COSDictionary)current);
-                }
-                else
-                {
-                    addObjectToWrite( current );
-                    writeReference( current );
-                }
+                writeDictionary((COSDictionary) current);
+            }
+            else if (current instanceof COSArray)
+            {
+                writeArray((COSArray) current);
             }
             else if( current instanceof COSObject )
             {
@@ -1137,6 +1151,32 @@ public class COSWriter implements ICOSVisitor
         }
         getStandardOutput().write(ARRAY_CLOSE);
         getStandardOutput().writeEOL();
+    }
+
+    private void writeArray(COSArray array) throws IOException
+    {
+        if (array.isDirect())
+        {
+            visitFromArray(array);
+        }
+        else
+        {
+            addObjectToWrite(array);
+            writeReference(array);
+        }
+    }
+
+    private void writeDictionary(COSDictionary dictionary) throws IOException
+    {
+        if (dictionary.isDirect())
+        {
+            visitFromDictionary(dictionary);
+        }
+        else
+        {
+            addObjectToWrite(dictionary);
+            writeReference(dictionary);
+        }
     }
 
     @Override
@@ -1177,18 +1217,7 @@ public class COSWriter implements ICOSVisitor
                             item.setDirect(true);
                         }
                     }
-
-                    if(dict.isDirect())
-                    {
-                        // If the object should be written direct, we need
-                        // to pass the dictionary to the visitor again.
-                        visitFromDictionary(dict);
-                    }
-                    else
-                    {
-                        addObjectToWrite( dict );
-                        writeReference( dict );
-                    }
+                    writeDictionary(dict);
                 }
                 else if( value instanceof COSObject )
                 {
@@ -1212,6 +1241,10 @@ public class COSWriter implements ICOSVisitor
                         value.accept(this);
                         byteRangeLength = getStandardOutput().getPos() - 1 - byteRangeOffset;
                         reachedSignature = false;
+                    }
+                    else if (value instanceof COSArray)
+                    {
+                        writeArray((COSArray) value);
                     }
                     else
                     {
@@ -1376,7 +1409,7 @@ public class COSWriter implements ICOSVisitor
             if (obj.hasData())
             {
                 input = obj.createRawInputStream();
-                IOUtils.copy(input, getStandardOutput());
+                input.transferTo(getStandardOutput());
             }
             getStandardOutput().writeCRLF();
             getStandardOutput().write(ENDSTREAM);
@@ -1396,12 +1429,17 @@ public class COSWriter implements ICOSVisitor
     {
         if (willEncrypt)
         {
-            pdDocument.getEncryption().getSecurityHandler().encryptString(
+            COSString encryptedCOSString = (COSString) pdDocument.getEncryption()
+                    .getSecurityHandler().encryptString(
                     obj,
                     currentObjectKey.getNumber(),
                     currentObjectKey.getGeneration());
+            COSWriter.writeString(encryptedCOSString, getStandardOutput());
         }
-        COSWriter.writeString(obj, getStandardOutput());
+        else
+        {
+            COSWriter.writeString(obj, getStandardOutput());
+        }
     }
 
     /**
@@ -1551,6 +1589,10 @@ public class COSWriter implements ICOSVisitor
             trailer.setItem(COSName.ID, idArray);
         }
         cosDoc.accept(this);
+        if (!incrementalUpdate)
+        {
+            cosDoc.setHighestXRefObjectNumber(number);
+        }
     }
 
     /**

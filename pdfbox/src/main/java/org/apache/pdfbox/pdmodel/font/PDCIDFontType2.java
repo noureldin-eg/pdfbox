@@ -19,20 +19,24 @@ package org.apache.pdfbox.pdmodel.font;
 import java.awt.geom.AffineTransform;
 import java.awt.geom.GeneralPath;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.HashSet;
 import java.util.Set;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
+import org.apache.fontbox.cff.CFFFont;
 import org.apache.fontbox.cff.Type2CharString;
 import org.apache.fontbox.cmap.CMap;
 import org.apache.fontbox.ttf.CmapLookup;
 import org.apache.fontbox.ttf.GlyphData;
 import org.apache.fontbox.ttf.OTFParser;
 import org.apache.fontbox.ttf.OpenTypeFont;
+import org.apache.fontbox.ttf.TTFParser;
 import org.apache.fontbox.ttf.TrueTypeFont;
 import org.apache.fontbox.util.BoundingBox;
 import org.apache.pdfbox.cos.COSDictionary;
+import org.apache.pdfbox.io.RandomAccessRead;
 import org.apache.pdfbox.pdmodel.common.PDRectangle;
 import org.apache.pdfbox.pdmodel.common.PDStream;
 import org.apache.pdfbox.util.Matrix;
@@ -44,9 +48,10 @@ import org.apache.pdfbox.util.Matrix;
  */
 public class PDCIDFontType2 extends PDCIDFont
 {
-    private static final Log LOG = LogFactory.getLog(PDCIDFontType2.class);
+    private static final Logger LOG = LogManager.getLogger(PDCIDFontType2.class);
 
     private final TrueTypeFont ttf;
+    private final OpenTypeFont otf;
     private final int[] cid2gid;
     private final boolean isEmbedded;
     private final boolean isDamaged;
@@ -83,6 +88,9 @@ public class PDCIDFontType2 extends PDCIDFont
         if (trueTypeFont != null)
         {
             ttf = trueTypeFont;
+            otf = trueTypeFont instanceof OpenTypeFont
+                    && ((OpenTypeFont) trueTypeFont).isSupportedOTF() ? (OpenTypeFont) trueTypeFont
+                            : null;
             isEmbedded = true;
             isDamaged = false;
         }
@@ -110,22 +118,26 @@ public class PDCIDFontType2 extends PDCIDFont
                 try
                 {
                     // embedded OTF or TTF
-                    OTFParser otfParser = new OTFParser(true);
-                    OpenTypeFont otf = otfParser.parse(stream.getCOSObject().createView());
-                    ttfFont = otf;
-    
-                    if (otf.isPostScript())
-                    {
-                        // PDFBOX-3344 contains PostScript outlines instead of TrueType
-                        fontIsDamaged = true;
-                        LOG.warn("Found CFF/OTF but expected embedded TTF font " + fd.getFontName());
-                    }
+                    RandomAccessRead view = stream.getCOSObject().createView();
+                    TTFParser ttfParser = getParser(view, true);
+                    ttfFont = ttfParser.parse(view);
+                    ttfFont.close();
                 }
                 catch (IOException e)
                 {
                     fontIsDamaged = true;
-                    LOG.warn("Could not read embedded OTF for font " + getBaseFont(), e);
+                    LOG.warn(() -> "Could not read embedded OTF for font " + getBaseFont(), e);
                 }
+                if (ttfFont instanceof OpenTypeFont && !((OpenTypeFont) ttfFont).isSupportedOTF())
+                {
+                    // the OpenType font contains CFF2 outlines which are not supported yet
+                    ttfFont = null;
+                    fontIsDamaged = true;
+                    LOG.warn(
+                            "Found an OpenType font using CFF2 outlines which are not supported {}",
+                            fd.getFontName());
+                }
+
             }
             isEmbedded = ttfFont != null;
             isDamaged = fontIsDamaged;
@@ -134,6 +146,8 @@ public class PDCIDFontType2 extends PDCIDFont
             {
                 ttfFont = findFontOrSubstitute();
             }
+            otf = ttfFont instanceof OpenTypeFont && ((OpenTypeFont) ttfFont).isSupportedOTF()
+                    ? (OpenTypeFont) ttfFont : null;
             ttf = ttfFont;
         }
         cmap = ttf.getUnicodeCmapLookup(false);
@@ -153,11 +167,17 @@ public class PDCIDFontType2 extends PDCIDFont
         }
         else
         {
-            ttfFont = (TrueTypeFont)mapping.getTrueTypeFont();
+            ttfFont = (TrueTypeFont) mapping.getTrueTypeFont();
+            if (ttfFont == null)
+            {
+                // shouldn't happen?!
+                throw new IOException("mapping.getTrueTypeFont() returns null, please report");
+            }
         }
         if (mapping.isFallback())
         {
-            LOG.warn("Using fallback font " + ttfFont.getName() + " for CID-keyed TrueType font " + getBaseFont());
+            LOG.warn("Using fallback font {} for CID-keyed TrueType font {}", ttfFont.getName(),
+                    getBaseFont());
         }
         return ttfFont;
     }
@@ -236,10 +256,14 @@ public class PDCIDFontType2 extends PDCIDFont
             // font's 'cmap' table. The means by which this is accomplished are implementation-
             // dependent.
             // omit the CID2GID mapping if the embedded font is replaced by an external font
-            if (cid2gid != null && !isDamaged)
+            String name = getName();
+            if (cid2gid != null && !isDamaged && name != null && name.equals(ttf.getName()))
             {
                 // Acrobat allows non-embedded GIDs - todo: can we find a test PDF for this?
-                LOG.warn("Using non-embedded GIDs in font " + getName());
+                // PDFBOX-5612: should happen only if it's really the same font
+                // this is not perfect, we may have to improve this because some identical fonts
+                // have different names
+                LOG.warn("Using non-embedded GIDs in font {}", getName());
                 int cid = codeToCID(code);
                 if (cid < cid2gid.length)
                 {
@@ -260,7 +284,8 @@ public class PDCIDFontType2 extends PDCIDFont
                     {
                         // we keep track of which warnings have been issued, so we don't log multiple times
                         noMapping.add(code);
-                        LOG.warn("Failed to find a character mapping for " + code + " in " + getName());
+                        LOG.warn("Failed to find a character mapping for {} in {}", code,
+                                getName());
                     }
                     // Acrobat is willing to use the CID as a GID, even when the font isn't embedded
                     // see PDFBOX-2599
@@ -296,16 +321,13 @@ public class PDCIDFontType2 extends PDCIDFont
             }
             else
             {
-                // "Identity" is the default CIDToGIDMap
-                if (cid < ttf.getNumberOfGlyphs())
+                // "Identity" is the default for CFF-based OpenTypeFonts
+                if (otf != null && otf.isPostScript())
                 {
                     return cid;
                 }
-                else
-                {
-                    // out of range CIDs map to GID 0
-                    return 0;
-                }
+                // "Identity" is the default for TrueTypeFonts if the CID is within the range
+                return cid < ttf.getNumberOfGlyphs() ? cid : 0;
             }
         }
     }
@@ -416,39 +438,38 @@ public class PDCIDFontType2 extends PDCIDFont
     @Override
     public GeneralPath getPath(int code) throws IOException
     {
-        if (ttf instanceof OpenTypeFont && ((OpenTypeFont)ttf).isPostScript())
+        if (otf != null && otf.isPostScript())
         {
-            // we're not supposed to have CFF fonts inside PDCIDFontType2, but if we do,
-            // then we treat their CIDs as GIDs, see PDFBOX-3344
-            int cid = codeToGID(code);
-            Type2CharString charstring = ((OpenTypeFont)ttf).getCFF().getFont().getType2CharString(cid);
-            return charstring.getPath();
+            GeneralPath path = getPathFromOutlines(code);
+            return path == null ? new GeneralPath() : path;
         }
-        else
+        int gid = codeToGID(code);
+        GlyphData glyph = ttf.getGlyph().getGlyph(gid);
+        if (glyph != null)
         {
-            int gid = codeToGID(code);
-            GlyphData glyph = ttf.getGlyph().getGlyph(gid);
-            if (glyph != null)
-            {
-                return glyph.getPath();
-            }
-            return new GeneralPath();
+            return glyph.getPath();
         }
+        return new GeneralPath();
     }
 
     @Override
     public GeneralPath getNormalizedPath(int code) throws IOException
     {
-        int gid = codeToGID(code);
-
-        GeneralPath path = getPath(code);
-
-        // Acrobat only draws GID 0 for embedded CIDFonts, see PDFBOX-2372
-        if (gid == 0 && !isEmbedded())
+        GeneralPath path = null;
+        if (otf != null && otf.isPostScript())
         {
-            path = null;
+            path = getPathFromOutlines(code);
         }
-
+        else
+        {
+            int gid = codeToGID(code);
+            path = getPath(code);
+            // Acrobat only draws GID 0 for embedded CIDFonts, see PDFBOX-2372
+            if (gid == 0 && !isEmbedded())
+            {
+                path = null;
+            }
+        }
         if (path == null)
         {
             // empty glyph (e.g. space, newline)
@@ -467,9 +488,42 @@ public class PDCIDFontType2 extends PDCIDFont
         return path;
     }
 
+    private GeneralPath getPathFromOutlines(int code) throws IOException
+    {
+        CFFFont cffFont = otf.getCFF().getFont();
+        int gid = codeToGID(code);
+        Type2CharString type2CharString = cffFont.getType2CharString(gid);
+        return type2CharString != null ? type2CharString.getPath() : null;
+    }
+
     @Override
     public boolean hasGlyph(int code) throws IOException
     {
         return codeToGID(code) != 0;
     }
+
+    private TTFParser getParser(RandomAccessRead randomAccessRead, boolean isEmbedded)
+            throws IOException
+    {
+        long startPos = randomAccessRead.getPosition();
+        byte[] tagBytes = new byte[4];
+        int remainingBytes = tagBytes.length;
+        int amountRead;
+        while ((amountRead = randomAccessRead.read(tagBytes, tagBytes.length - remainingBytes,
+                remainingBytes)) > 0)
+        {
+            remainingBytes -= amountRead;
+        }
+        randomAccessRead.seek(startPos);
+        if ("OTTO".equals(new String(tagBytes, StandardCharsets.US_ASCII)))
+        {
+            return new OTFParser(isEmbedded);
+        }
+        else
+        {
+            return new TTFParser(isEmbedded);
+        }
+    }
+
 }
+

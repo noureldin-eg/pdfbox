@@ -70,7 +70,7 @@ public class TextToPDF implements Callable<Integer>
 
     // Expected for CLI app to write to System.out/System.err
     @SuppressWarnings("squid:S106")
-    private static final PrintStream SYSERR = System.err;
+    private final PrintStream SYSERR;
 
     @Option(names = "-fontSize", description = "the size of the font to use (default: ${DEFAULT-VALUE}")
     private int fontSize = DEFAULT_FONT_SIZE;
@@ -124,8 +124,15 @@ public class TextToPDF implements Callable<Integer>
     }
 
     /**
-     * This will create a PDF document with some text in it.
-     * <br>
+     * Constructor.
+     */
+    public TextToPDF()
+    {
+        SYSERR = System.err;
+    }
+
+    /**
+     * This will create a PDF document with some text in it. <br>
      * see usage() for commandline
      *
      * @param args Command line arguments.
@@ -282,7 +289,7 @@ public class TextToPDF implements Callable<Integer>
                     // word1 is the part before ff, word2 after
                     // both can be empty
                     // word1 can also be empty without ff, if a line has many spaces
-                    if (word1.length() > 0 || !ff)
+                    if (!word1.isEmpty() || !ff)
                     {
                         if (addSpace)
                         {
@@ -294,7 +301,7 @@ public class TextToPDF implements Callable<Integer>
                         }
                         nextLineToDraw.append(word1);
                     }
-                    if (!ff || word2.length() == 0)
+                    if (!ff || word2.isEmpty())
                     {
                         lineIndex++;
                     }

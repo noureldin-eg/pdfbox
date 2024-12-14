@@ -22,6 +22,7 @@ import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.net.URISyntaxException;
 import java.security.GeneralSecurityException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -35,8 +36,8 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.cos.COSArray;
 import org.apache.pdfbox.cos.COSBase;
@@ -78,7 +79,7 @@ import org.bouncycastle.tsp.TimeStampTokenInfo;
  */
 public class AddValidationInformation
 {
-    private static final Log LOG = LogFactory.getLog(AddValidationInformation.class);
+    private static final Logger LOG = LogManager.getLogger(AddValidationInformation.class);
 
     private CertInformationCollector certInformationHelper;
     private COSArray correspondingOCSPs;
@@ -290,7 +291,8 @@ public class AddValidationInformation
 
             if (certInfo.getOcspUrl() == null && certInfo.getCrlUrl() == null)
             {
-                LOG.info("No revocation information for cert " + certInfo.getCertificate().getSubjectX500Principal());
+                LOG.info("No revocation information for cert {}",
+                        certInfo.getCertificate().getSubjectX500Principal());
             }
             else if (!isRevocationInfoFound)
             {
@@ -324,9 +326,9 @@ public class AddValidationInformation
             addOcspData(certInfo);
             return true;
         }
-        catch (OCSPException | CertificateProccessingException | IOException e)
+        catch (OCSPException | CertificateProccessingException | IOException | URISyntaxException e)
         {
-            LOG.error("Failed fetching OCSP at " + certInfo.getOcspUrl(), e);
+            LOG.error("Failed fetching OCSP at {}", certInfo.getOcspUrl(), e);
             return false;
         }
         catch (RevokedCertificateException e)
@@ -348,7 +350,8 @@ public class AddValidationInformation
         {
             addCrlRevocationInfo(certInfo);
         }
-        catch (GeneralSecurityException | IOException | RevokedCertificateException | CertificateVerificationException e)
+        catch (GeneralSecurityException | IOException | URISyntaxException |
+               RevokedCertificateException | CertificateVerificationException e)
         {
             LOG.warn("Failed fetching CRL", e);
             throw new IOException(e);
@@ -365,7 +368,7 @@ public class AddValidationInformation
      * @throws RevokedCertificateException
      */
     private void addOcspData(CertSignatureInformation certInfo) throws IOException, OCSPException,
-            CertificateProccessingException, RevokedCertificateException
+            CertificateProccessingException, RevokedCertificateException, URISyntaxException
     {
         if (ocspChecked.contains(certInfo.getCertificate()))
         {
@@ -429,13 +432,14 @@ public class AddValidationInformation
      * 
      * @param certInfo the certificate info, for it to check CRL data.
      * @throws IOException
+     * @throws URISyntaxException
      * @throws RevokedCertificateException
      * @throws GeneralSecurityException
      * @throws CertificateVerificationException 
      */
     private void addCrlRevocationInfo(CertSignatureInformation certInfo)
             throws IOException, RevokedCertificateException, GeneralSecurityException,
-            CertificateVerificationException
+            CertificateVerificationException, URISyntaxException
     {
         X509CRL crl = CRLVerifier.downloadCRLFromWeb(certInfo.getCrlUrl());
         X509Certificate issuerCertificate = certInfo.getIssuerCertificate();
@@ -506,13 +510,13 @@ public class AddValidationInformation
             correspondingOCSPs = new COSArray();
             correspondingCRLs = new COSArray();
             addRevocationDataRecursive(certInfo);
-            if (correspondingOCSPs.size() > 0)
+            if (!correspondingOCSPs.isEmpty())
             {
-                vri.setItem("OCSP", correspondingOCSPs);
+                vri.setItem(COSName.OCSP, correspondingOCSPs);
             }
-            if (correspondingCRLs.size() > 0)
+            if (!correspondingCRLs.isEmpty())
             {
-                vri.setItem("CRL", correspondingCRLs);
+                vri.setItem(COSName.CRL, correspondingCRLs);
             }
         }
 
@@ -598,14 +602,14 @@ public class AddValidationInformation
     {
         COSDictionary dssExtensions = new COSDictionary();
         dssExtensions.setDirect(true);
-        catalog.getCOSObject().setItem("Extensions", dssExtensions);
+        catalog.getCOSObject().setItem(COSName.EXTENSIONS, dssExtensions);
 
         COSDictionary adbeExtension = new COSDictionary();
         adbeExtension.setDirect(true);
-        dssExtensions.setItem("ADBE", adbeExtension);
+        dssExtensions.setItem(COSName.ADBE, adbeExtension);
 
-        adbeExtension.setName("BaseVersion", "1.7");
-        adbeExtension.setInt("ExtensionLevel", 5);
+        adbeExtension.setName(COSName.BASE_VERSION, "1.7");
+        adbeExtension.setInt(COSName.EXTENSION_LEVEL, 5);
 
         catalog.setVersion("1.7");
     }

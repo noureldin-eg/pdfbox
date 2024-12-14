@@ -30,6 +30,7 @@ import java.io.File;
 import java.io.IOException;
 import java.io.PrintStream;
 
+import java.util.concurrent.Callable;
 
 /**
  * This example will take a PDF document and fill the fields with data from the
@@ -38,11 +39,11 @@ import java.io.PrintStream;
  * @author Ben Litchfield
  */
 @Command(name = "importxfdf", header = "Imports AcroForm form data from XFDF", versionProvider = Version.class, mixinStandardHelpOptions = true)
-public class ImportXFDF
+public class ImportXFDF implements Callable<Integer>
 {
     // Expected for CLI app to write to System.out/System.err
     @SuppressWarnings("squid:S106")
-    private static final PrintStream SYSERR = System.err;
+    private final PrintStream SYSERR;
 
     @Option(names = {"-i", "--input"}, description = "the PDF file to import to", required = true)
     private File infile;
@@ -71,8 +72,15 @@ public class ImportXFDF
     }
 
     /**
-     * This will import an fdf document and write out another pdf.
-     * <br>
+     * Constructor.
+     */
+    public ImportXFDF()
+    {
+        SYSERR = System.err;
+    }
+
+    /**
+     * This will import an fdf document and write out another pdf. <br>
      * see usage() for commandline
      *
      * @param args command line arguments
@@ -88,7 +96,7 @@ public class ImportXFDF
 
     public Integer call()
     {
-        ImportFDF importer = new ImportFDF();
+        ImportXFDF importer = new ImportXFDF();
         try (PDDocument pdf = Loader.loadPDF(infile);
                 FDFDocument fdf = Loader.loadXFDF(xfdffile))
         {

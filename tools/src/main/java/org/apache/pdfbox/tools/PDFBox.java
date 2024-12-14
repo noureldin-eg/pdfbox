@@ -30,11 +30,10 @@ import picocli.CommandLine.Spec;
  * Used as the main class in the runnable standalone PDFBox jar.
  */
 @Command(name="pdfbox",
-    customSynopsis = "pdfbox [COMMAND] [OPTIONS]",
-    footer = {
-        "See 'pdfbox help <command>' to read about a specific subcommand"
-    },
-    versionProvider = Version.class)
+        subcommandsRepeatable = true,
+        customSynopsis = "pdfbox [COMMAND] [OPTIONS]",
+        footer = { "See 'pdfbox help <command>' to read about a specific subcommand" },
+        versionProvider = Version.class)
 public final class PDFBox implements Runnable
 {
     @Spec CommandLine.Model.CommandSpec spec;
@@ -58,6 +57,7 @@ public final class PDFBox implements Runnable
         commandLine.addSubcommand("encrypt", Encrypt.class);
         commandLine.addSubcommand("decode", WriteDecodedDoc.class);
         commandLine.addSubcommand("export:images", ExtractImages.class);
+        commandLine.addSubcommand("export:xmp", ExtractXMP.class);
         commandLine.addSubcommand("export:text", ExtractText.class);
         commandLine.addSubcommand("export:fdf", ExportFDF.class);
         commandLine.addSubcommand("export:xfdf", ExportXFDF.class);

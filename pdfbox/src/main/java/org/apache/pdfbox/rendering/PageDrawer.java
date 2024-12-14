@@ -33,6 +33,9 @@ import java.awt.TexturePaint;
 import java.awt.Transparency;
 import java.awt.color.ColorSpace;
 import java.awt.geom.AffineTransform;
+import static java.awt.geom.AffineTransform.TYPE_FLIP;
+import static java.awt.geom.AffineTransform.TYPE_MASK_SCALE;
+import static java.awt.geom.AffineTransform.TYPE_TRANSLATION;
 import java.awt.geom.Area;
 import java.awt.geom.GeneralPath;
 import java.awt.geom.Path2D;
@@ -59,8 +62,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
 import org.apache.pdfbox.contentstream.PDFGraphicsStreamEngine;
 import org.apache.pdfbox.cos.COSArray;
 import org.apache.pdfbox.cos.COSBase;
@@ -120,7 +123,11 @@ import org.apache.pdfbox.util.Vector;
  */
 public class PageDrawer extends PDFGraphicsStreamEngine
 {
-    private static final Log LOG = LogFactory.getLog(PageDrawer.class);
+    private static final Logger LOG = LogManager.getLogger(PageDrawer.class);
+
+    private static final String OS_NAME = System.getProperty("os.name").toLowerCase();
+    private static final boolean IS_WINDOWS = OS_NAME.startsWith("windows");
+    private static final boolean IS_LINUX = OS_NAME.startsWith("linux");
 
     // parent document renderer - note: this is needed for not-yet-implemented resource caching
     private final PDFRenderer renderer;
@@ -167,6 +174,7 @@ public class PageDrawer extends PDFGraphicsStreamEngine
     private final RenderingHints renderingHints;
     private final float imageDownscalingOptimizationThreshold;
     private LookupTable invTable = null;
+    private final Map<COSBase,Boolean> blendModeMap = new HashMap<>();
 
     /**
     * Default annotations filter, returns all annotations
@@ -341,7 +349,12 @@ public class PageDrawer extends PDFGraphicsStreamEngine
     protected Paint getPaint(PDColor color) throws IOException
     {
         PDColorSpace colorSpace = color.getColorSpace();
-        if (colorSpace instanceof PDSeparation &&
+        if (colorSpace == null) // PDFBOX-5782
+        {
+            LOG.error("colorSpace is null, will be rendered as transparency");
+            return new Color(0, 0, 0, 0);
+        }
+        else if (colorSpace instanceof PDSeparation &&
                 "None".equals(((PDSeparation) colorSpace).getColorantName()))
         {
             // PDFBOX-4900: "The special colorant name None shall not produce any visible output"
@@ -525,7 +538,8 @@ public class PageDrawer extends PDFGraphicsStreamEngine
             if (!font.isEmbedded() && !font.isVertical() && !font.isStandard14() && font.hasExplicitWidth(code))
             {
                 float fontWidth = font.getWidthFromFont(code);
-                if (fontWidth > 0 && // ignore spaces
+                if (displacement.getX() > 0 && // PDFBOX-5611: ignore zero widths
+                        fontWidth > 0 && // ignore spaces
                         Math.abs(fontWidth - displacement.getX() * 1000) > 0.0001)
                 {
                     float pdfWidth = displacement.getX() * 1000;
@@ -569,7 +583,7 @@ public class PageDrawer extends PDFGraphicsStreamEngine
     {
         PDGraphicsState state = getGraphicsState();
         RenderingMode renderingMode = state.getTextState().getRenderingMode();
-        if (!RenderingMode.NEITHER.equals(renderingMode))
+        if (RenderingMode.NEITHER != renderingMode)
         {
             super.showType3Glyph(textRenderingMatrix, font, code, displacement);
         }
@@ -604,7 +618,8 @@ public class PageDrawer extends PDFGraphicsStreamEngine
             {
                 PDTransparencyGroup form = softMask.getGroup();
                 PDColorSpace colorSpace = form.getGroup().getColorSpace(form.getResources());
-                if (colorSpace != null)
+                if (colorSpace != null &&
+                    colorSpace.getNumberOfComponents() == backdropColorArray.size()) // PDFBOX-5795
                 {
                     backdropColor = new PDColor(backdropColorArray, colorSpace);
                 }
@@ -720,7 +735,7 @@ public class PageDrawer extends PDFGraphicsStreamEngine
         float miterLimit = state.getMiterLimit();
         if (miterLimit < 1)
         {
-            LOG.warn("Miter limit must be >= 1, value " + miterLimit + " is ignored");
+            LOG.warn("Miter limit must be >= 1, value {} is ignored", miterLimit);
             miterLimit = 10;
         }
         return new BasicStroke(lineWidth, lineCap, lineJoin,
@@ -746,9 +761,8 @@ public class PageDrawer extends PDFGraphicsStreamEngine
     private float[] getDashArray(PDLineDashPattern dashPattern)
     {
         float[] dashArray = dashPattern.getDashArray();
-        int phase = dashPattern.getPhase();
         // avoid empty, infinite and NaN values (PDFBOX-3360)
-        if (dashArray.length == 0 || Float.isInfinite(phase) || Float.isNaN(phase))
+        if (dashArray.length == 0)
         {
             return null;
         }
@@ -991,7 +1005,7 @@ public class PageDrawer extends PDFGraphicsStreamEngine
             if (!linePath.getPathIterator(null).isDone())
             {
                 // PDFBOX-4949 / PDF.js 12306: don't clip if "W n" only
-                getGraphicsState().intersectClippingPath(linePath);
+                getGraphicsState().intersectClippingPath(adjustClip(linePath));
             }
 
             // PDFBOX-3836: lastClip needs to be reset, because after intersection it is still the same 
@@ -1003,6 +1017,63 @@ public class PageDrawer extends PDFGraphicsStreamEngine
         linePath.reset();
     }
     
+    /**
+     * PDFBOX-5715 / PR#73: This was added to fix a problem with missing fine lines when printing
+     * on MacOS. Lines vanish because CPrinterJob sets graphics scale to 1 for Printable so after
+     * scaling lines often have a width smaller than 1 after scaling and clipping. This change
+     * enlarges the clip bounds to cover at least 1 point plus 0.5 on one and another side in the
+     * device space to allow to draw the linePath inside the clip. The linePath can consists from
+     * different lines but when its bounds width or height is less than 1.0 it seems safe to use a
+     * rectangle as a clip instead of the real path. A more detailed explanation can be read
+     * <a href="https://github.com/apache/pdfbox/pull/173">here</a>.
+     *
+     * @param linePath
+     * @return 
+     */
+    private GeneralPath adjustClip(GeneralPath linePath)
+    {
+        AffineTransform tx = graphics.getTransform();
+        int type = tx.getType();
+
+        if ((type & ~(TYPE_TRANSLATION | TYPE_FLIP)) == 0)
+        {
+            return linePath;
+        }
+        else if ((type & ~(TYPE_TRANSLATION | TYPE_FLIP | TYPE_MASK_SCALE)) == 0)
+        {
+            double sx = Math.abs(tx.getScaleX());
+            double sy = Math.abs(tx.getScaleY());
+            if (sx > 1.0 && sy > 1.0)
+            {
+                return linePath;
+            }
+
+            Rectangle2D bounds = linePath.getBounds();
+            double w = bounds.getWidth();
+            double h = bounds.getHeight();
+            double sw = sx * w;
+            double sh = sy * h;
+            final double minSize = 2.0;
+            if (sw < minSize || sh < minSize)
+            {
+                double x = bounds.getX();
+                double y = bounds.getY();
+                if (sw < minSize)
+                {
+                    w = minSize / sx;
+                    x = bounds.getCenterX() - w / 2;
+                }
+                if (sh < minSize)
+                {
+                    h = minSize / sy;
+                    y = bounds.getCenterY() - h / 2;
+                }
+                return new GeneralPath(new Rectangle2D.Double(x, y, w, h));
+            }
+        }
+        return linePath;
+    }
+
     @Override
     public void drawImage(PDImage pdImage) throws IOException
     {
@@ -1087,6 +1158,13 @@ public class PageDrawer extends PDFGraphicsStreamEngine
                 double scaleY = Math.abs(m.getScalingFactorY());
 
                 boolean smallMask = mask.getWidth() <= 8 && mask.getHeight() <= 8;
+                if (mask.getWidth() == 1 && mask.getHeight() == 1)
+                {
+                    // PDFBOX-5802: force usage of the lookup table if it is only 1 pixel
+                    // (See the comment for PDFBOX-5403 that it isn't done for some
+                    // cases based purely on the rendering result of one file!)
+                    smallMask = false;
+                }
                 if (!smallMask)
                 {
                     // PDFBOX-5403:
@@ -1114,13 +1192,13 @@ public class PageDrawer extends PDFGraphicsStreamEngine
                 {
                     g.drawImage(mask, imageTransform, null);
                 }
-                else
+                else if (scaleX != 0 && scaleY != 0)
                 {
-                    while (scaleX < 0.25)
+                    while (scaleX < 0.25 || Math.round(mask.getWidth() * scaleX) < 1)
                     {
                         scaleX *= 2.0;
                     }
-                    while (scaleY < 0.25)
+                    while (scaleY < 0.25 || Math.round(mask.getHeight() * scaleY) < 1)
                     {
                         scaleY *= 2.0;
                     }
@@ -1187,15 +1265,15 @@ public class PageDrawer extends PDFGraphicsStreamEngine
     }
 
     /**
-     * Calculated the subsampling frequency for a given PDImage based on the current transformation
-     * and its calculated transform
+     * Calculates the subsampling frequency for a given PDImage based on the current transformation
+     * and its calculated transform. Extend this method if you want to use your own strategy.
      *
      * @param pdImage PDImage to be drawn
      * @param at Transform that will be applied to the image when drawing
      * @return The rounded-down ratio of image pixels to drawn pixels. Returned value will always be
-     * >=1.
+     * &gt;=1.
      */
-    private int getSubsampling(PDImage pdImage, AffineTransform at)
+    protected int getSubsampling(PDImage pdImage, AffineTransform at)
     {
         // calculate subsampling according to the resulting image size
         double scale = Math.abs(at.getDeterminant() * xform.getDeterminant());
@@ -1283,6 +1361,29 @@ public class PageDrawer extends PDFGraphicsStreamEngine
             }
             else
             {
+                GraphicsConfiguration graphicsConfiguration = graphics.getDeviceConfiguration();
+                int deviceType = GraphicsDevice.TYPE_RASTER_SCREEN;
+                if (graphicsConfiguration != null)
+                {
+                    GraphicsDevice graphicsDevice = graphicsConfiguration.getDevice();
+                    if (graphicsDevice != null)
+                    {
+                        deviceType = graphicsDevice.getType();
+                    }
+                }
+                if (deviceType == GraphicsDevice.TYPE_PRINTER &&
+                    image.getType() != BufferedImage.TYPE_4BYTE_ABGR &&
+                    (IS_WINDOWS || IS_LINUX))
+                {
+                    // PDFBOX-5601, PDFBOX-4010, JDK-8308099, JDK-8191800:
+                    // workaround to avoid terrible / missing output on printer unless TYPE_4BYTE_ABGR
+                    BufferedImage bim = new BufferedImage(
+                            image.getWidth(), image.getHeight(), BufferedImage.TYPE_4BYTE_ABGR);
+                    Graphics g = bim.getGraphics();
+                    g.drawImage(image, 0, 0, null);
+                    g.dispose();
+                    image = bim;
+                }
                 graphics.drawImage(image, imageTransform, null);
             }
         }
@@ -1387,7 +1488,7 @@ public class PageDrawer extends PDFGraphicsStreamEngine
         PDShading shading = getResources().getShading(shadingName);
         if (shading == null)
         {
-            LOG.error("shading " + shadingName + " does not exist in resources dictionary");
+            LOG.error("shading {} does not exist in resources dictionary", shadingName);
             return;
         }
         Matrix ctm = getGraphicsState().getCurrentTransformationMatrix();
@@ -1801,7 +1902,7 @@ public class PageDrawer extends PDFGraphicsStreamEngine
         private BufferedImage create2ByteGrayAlphaImage(int width, int height) 
         {
             // gray + alpha
-            int[] bandOffsets = new int[] {1, 0};
+            int[] bandOffsets = {1, 0};
             int bands = bandOffsets.length;
 
             // Color Model used for raw GRAY + ALPHA
@@ -1877,14 +1978,21 @@ public class PageDrawer extends PDFGraphicsStreamEngine
     {
         if (groupsDone.contains(group.getCOSObject()))
         {
-            // The group was already processed. Avoid endless recursion.
+            // The group is being processed. Avoid endless recursion.
             return false;
         }
         groupsDone.add(group.getCOSObject());
 
+        Boolean val = blendModeMap.get(group.getCOSObject());
+        if (val != null)
+        {
+            return val;
+        }
+
         PDResources resources = group.getResources();
         if (resources == null)
         {
+            blendModeMap.put(group.getCOSObject(), false);
             return false;
         }
         for (COSName name : resources.getExtGStateNames())
@@ -1897,6 +2005,7 @@ public class PageDrawer extends PDFGraphicsStreamEngine
             BlendMode blendMode = extGState.getBlendMode();
             if (blendMode != BlendMode.NORMAL)
             {
+                blendModeMap.put(group.getCOSObject(), true);
                 return true;
             }
         }
@@ -1916,10 +2025,12 @@ public class PageDrawer extends PDFGraphicsStreamEngine
             if (xObject instanceof PDTransparencyGroup &&
                 hasBlendMode((PDTransparencyGroup)xObject, groupsDone))
             {
+                blendModeMap.put(group.getCOSObject(), true);
                 return true;
             }
         }
 
+        blendModeMap.put(group.getCOSObject(), false);
         return false;
     }
 
@@ -1974,7 +2085,7 @@ public class PageDrawer extends PDFGraphicsStreamEngine
                     return true;
                 }
             }
-            else if (RenderState.OFF.equals(printState))
+            else if (RenderState.OFF == printState)
             {
                 return true;
             }
@@ -1988,10 +2099,10 @@ public class PageDrawer extends PDFGraphicsStreamEngine
 
     private boolean isHiddenOCMD(PDOptionalContentMembershipDictionary ocmd)
     {
-        if (ocmd.getCOSObject().getCOSArray(COSName.VE) != null)
+        COSArray veArray = ocmd.getCOSObject().getCOSArray(COSName.VE);
+        if (veArray != null && !veArray.isEmpty())
         {
-            // support seems to be optional, and is approximated by /P and /OCGS
-            LOG.info("/VE entry ignored in Optional Content Membership Dictionary");
+            return isHiddenVisibilityExpression(veArray);
         }
         List<PDPropertyList> oCGs = ocmd.getOCGs();
         if (oCGs.isEmpty())
@@ -2005,7 +2116,7 @@ public class PageDrawer extends PDFGraphicsStreamEngine
         // visible if any of the entries in OCGs are OFF
         if (COSName.ANY_OFF.equals(visibilityPolicy))
         {
-            return visibles.stream().noneMatch(v -> !v);
+            return visibles.stream().allMatch(v -> v);
         }
 
         // visible only if all of the entries in OCGs are ON
@@ -2023,6 +2134,109 @@ public class PageDrawer extends PDFGraphicsStreamEngine
         // visible if any of the entries in OCGs are ON
         // AnyOn is default
         return visibles.stream().noneMatch(v -> v);
+    }
+
+    private boolean isHiddenVisibilityExpression(COSArray veArray)
+    {
+        if (veArray.isEmpty())
+        {
+            return false;
+        }
+        String op = veArray.getName(0);
+        if (op == null)
+        {
+            return false;
+        }
+        switch (op)
+        {
+            case "And":
+                return isHiddenAndVisibilityExpression(veArray);
+            case "Or":
+                return isHiddenOrVisibilityExpression(veArray);
+            case "Not":
+                return isHiddenNotVisibilityExpression(veArray);
+            default:
+                return false;
+        }
+    }
+
+    private boolean isHiddenAndVisibilityExpression(COSArray veArray)
+    {
+        // hidden if at least one isn't visible
+        for (int i = 1; i < veArray.size(); ++i)
+        {
+            COSBase base = veArray.getObject(i);
+            if (base instanceof COSArray)
+            {
+                // Another VE
+                boolean isHidden = isHiddenVisibilityExpression((COSArray) base);
+                if (isHidden)
+                {
+                    return true;
+                }
+            }
+            else if (base instanceof COSDictionary)
+            {
+                // Another OCG
+                PDPropertyList prop = PDPropertyList.create((COSDictionary) base);
+                boolean isHidden = isHiddenOCG(prop);
+                if (isHidden)
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private boolean isHiddenOrVisibilityExpression(COSArray veArray)
+    {
+        // hidden only if all are hidden
+        for (int i = 1; i < veArray.size(); ++i)
+        {
+            COSBase base = veArray.getObject(i);
+            if (base instanceof COSArray)
+            {
+                // Another VE
+                boolean isHidden = isHiddenVisibilityExpression((COSArray) base);
+                if (!isHidden)
+                {
+                    return false;
+                }
+            }
+            else if (base instanceof COSDictionary)
+            {
+                // Another OCG
+                PDPropertyList prop = PDPropertyList.create((COSDictionary) base);
+                boolean isHidden = isHiddenOCG(prop);
+                if (!isHidden)
+                {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    private boolean isHiddenNotVisibilityExpression(COSArray veArray)
+    {
+        if (veArray.size() != 2)
+        {
+            return false;
+        }
+        COSBase base = veArray.getObject(1);
+        if (base instanceof COSArray)
+        {
+            // Another VE
+            return !isHiddenVisibilityExpression((COSArray) base);
+        }
+        else if (base instanceof COSDictionary)
+        {
+            // Another OCG
+            PDPropertyList prop = PDPropertyList.create((COSDictionary) base);
+            return !isHiddenOCG(prop);
+        }
+        return false;
     }
 
     private LookupTable getInvLookupTable()

@@ -20,6 +20,9 @@ import java.io.File;
 import java.io.IOException;
 import java.util.concurrent.TimeUnit;
 
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.core.config.Configurator;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.text.PDFTextStripper;
@@ -34,8 +37,7 @@ public class TextExtraction {
     static final String PDF32000_2008 = "target/pdfs/PDF32000_2008.pdf";
 
     static {
-        System.setProperty("org.apache.commons.logging.Log",
-                     "org.apache.commons.logging.impl.NoOpLog");
+        Configurator.setAllLevels(LogManager.getRootLogger().getName(), Level.OFF);
         java.util.logging.Logger.getLogger("org.apache").setLevel(java.util.logging.Level.OFF);
     }
     
@@ -44,23 +46,25 @@ public class TextExtraction {
     @OutputTimeUnit(TimeUnit.MILLISECONDS)
     @BenchmarkMode(Mode.AverageTime)
     public void extractPDFSpecUnsorted(Blackhole blackhole) throws IOException {
-        PDDocument pdf = Loader.loadPDF(new File(PDF32000_2008));
-        PDFTextStripper pdfStripper = new PDFTextStripper();
-        pdfStripper.setSortByPosition(false);
-        String parsedText = pdfStripper.getText(pdf);
-        blackhole.consume(parsedText);
-        pdf.close();
+        try (PDDocument pdf = Loader.loadPDF(new File(PDF32000_2008)))
+        {
+            PDFTextStripper pdfStripper = new PDFTextStripper();
+            pdfStripper.setSortByPosition(false);
+            String parsedText = pdfStripper.getText(pdf);
+            blackhole.consume(parsedText);
+        }
     }
 
     @Benchmark
     @OutputTimeUnit(TimeUnit.MILLISECONDS)
     @BenchmarkMode(Mode.AverageTime)
     public void extractPDFSpecSorted(Blackhole blackhole) throws IOException {
-        PDDocument pdf = Loader.loadPDF(new File(PDF32000_2008));
-        PDFTextStripper pdfStripper = new PDFTextStripper();
-        pdfStripper.setSortByPosition(true);
-        String parsedText = pdfStripper.getText(pdf);
-        blackhole.consume(parsedText);
-        pdf.close();
+        try (PDDocument pdf = Loader.loadPDF(new File(PDF32000_2008)))
+        {
+            PDFTextStripper pdfStripper = new PDFTextStripper();
+            pdfStripper.setSortByPosition(true);
+            String parsedText = pdfStripper.getText(pdf);
+            blackhole.consume(parsedText);
+        }
     }
 }

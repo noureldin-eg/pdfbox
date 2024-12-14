@@ -21,6 +21,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStreamWriter;
 import java.io.PrintStream;
+import java.io.PrintWriter;
 import java.io.Writer;
 import java.util.Map;
 import java.util.Set;
@@ -28,10 +29,9 @@ import java.util.TreeSet;
 import java.util.concurrent.Callable;
 
 import org.apache.commons.io.FilenameUtils;
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
 import org.apache.pdfbox.Loader;
-import org.apache.pdfbox.cos.COSArray;
 import org.apache.pdfbox.cos.COSName;
 import org.apache.pdfbox.io.RandomAccessReadBuffer;
 import org.apache.pdfbox.pdmodel.PDDocument;
@@ -61,15 +61,15 @@ import picocli.CommandLine.Option;
 @Command(name = "extracttext", header = "Extracts the text from a PDF document", versionProvider = Version.class, mixinStandardHelpOptions = true)
 public final class ExtractText  implements Callable<Integer>
 {
-    private static final Log LOG = LogFactory.getLog(ExtractText.class);
+    private static final Logger LOG = LogManager.getLogger(ExtractText.class);
 
     private static final String STD_ENCODING = "UTF-8";
 
     // Expected for CLI app to write to System.out/System.err
     @SuppressWarnings("squid:S106")
-    private static final PrintStream SYSOUT = System.out;
+    private final PrintStream SYSOUT;
     @SuppressWarnings("squid:S106")
-    private static final PrintStream SYSERR = System.err;
+    private final PrintStream SYSERR;
 
     @Option(names = "-alwaysNext", description = "Process next page (if applicable) despite IOException " + 
         "(ignored when -html)")
@@ -89,6 +89,9 @@ public final class ExtractText  implements Callable<Integer>
 
     @Option(names = "-html", description = "Output in HTML format instead of raw text")
     private boolean toHTML = false;
+
+    @Option(names = "-md", description = "Output in Markdown format instead of raw text")
+    private boolean toMD = false;
 
     @Option(names = "-ignoreBeads", description = "Disables the separation by beads")
     private boolean ignoreBeads = false;
@@ -112,6 +115,21 @@ public final class ExtractText  implements Callable<Integer>
     @Option(names = {"-o", "--output"}, description = "the exported text file")
     private File outfile;
 
+    @Option(names = "-addFileName", description = "Print PDF file name to the output text")
+    private boolean addFileName = false;
+
+    @Option(names = "-append", description = "Use append mode for output file")
+    private boolean append = false;
+
+    /**
+     * Constructor.
+     */
+    public ExtractText()
+    {
+        SYSOUT = System.out;
+        SYSERR = System.err;
+    }
+
     /**
      * Infamous main method.
      *
@@ -133,7 +151,13 @@ public final class ExtractText  implements Callable<Integer>
     public Integer call()
     {
         // set file extension
+        if (toHTML && toMD)
+        {
+            SYSERR.println( "You can't set md and html at the same time");
+            return 1;
+        }
         String ext = toHTML ? ".html" : ".txt";
+        ext = toMD ? ".md" : ext;
 
         if (outfile == null)
         {
@@ -141,8 +165,19 @@ public final class ExtractText  implements Callable<Integer>
             outfile = new File(outPath);
         }
 
+        if (toHTML && !STD_ENCODING.equals(encoding))
+        {
+            encoding = STD_ENCODING;
+            SYSOUT.println("The encoding parameter is ignored when writing html output.");
+        }
+
+        if (toConsole && encoding != null)
+        {
+            SYSOUT.println("The encoding parameter is ignored when writing to the console.");
+        }
+
         try (PDDocument document = Loader.loadPDF(infile, password);
-             Writer output = toConsole ? new OutputStreamWriter( SYSOUT, encoding ) : new OutputStreamWriter( new FileOutputStream( outfile ), encoding ))
+                Writer output = createOutputWriter())
         {
             long startTime = startProcessing("Loading PDF " + infile);
 
@@ -155,13 +190,13 @@ public final class ExtractText  implements Callable<Integer>
             
             stopProcessing("Time for loading: ", startTime);
 
-            if (toHTML && !STD_ENCODING.equals(encoding))
-            {
-                encoding = STD_ENCODING;
-                SYSOUT.println("The encoding parameter is ignored when writing html output.");
-            }
-
             startTime = startProcessing("Starting text extraction");
+
+            if (addFileName)
+            {
+                output.write("PDF file: " + infile);
+                output.write(System.lineSeparator());
+            }
 
             if (debug)
             {
@@ -183,13 +218,27 @@ public final class ExtractText  implements Callable<Integer>
             }
             else
             {
-                if (rotationMagic)
+                if (toMD)
                 {
-                    stripper = new FilteredTextStripper();
+                    if (rotationMagic)
+                    {
+                        stripper = new FilteredText2Markdown();
+                    }
+                    else
+                    {
+                        stripper = new PDFText2Markdown();
+                    }
                 }
                 else
                 {
-                    stripper = new PDFTextStripper();
+                    if (rotationMagic)
+                    {
+                        stripper = new FilteredTextStripper();
+                    }
+                    else
+                    {
+                        stripper = new PDFTextStripper();
+                    }
                 }
                 stripper.setSortByPosition(sort);
                 stripper.setShouldSeparateByBeads(!ignoreBeads);
@@ -243,6 +292,7 @@ public final class ExtractText  implements Callable<Integer>
                     }
                 }
             }
+            output.flush();
             stopProcessing("Time for extraction: ", startTime);
         }
         catch (IOException ioe)
@@ -252,6 +302,25 @@ public final class ExtractText  implements Callable<Integer>
         }
 
         return 0;
+    }
+
+    private Writer createOutputWriter() throws IOException
+    {
+        if (toConsole)
+        {
+            return new PrintWriter(SYSOUT)
+            {
+                @Override
+                public void close()
+                {
+                    // don't close the console
+                }
+            };
+        }
+        else
+        {
+            return new OutputStreamWriter(new FileOutputStream(outfile, append), encoding);
+        }
     }
 
     private void extractPages(int startPage, int endPage,
@@ -287,7 +356,7 @@ public final class ExtractText  implements Callable<Integer>
                         stripper.writeText(document, output);
 
                         // remove prepended transformation
-                        ((COSArray) page.getCOSObject().getItem(COSName.CONTENTS)).remove(0);
+                        page.getCOSObject().getCOSArray(COSName.CONTENTS).remove(0);
                     }
                     page.setRotation(rotation);
                 }
@@ -368,10 +437,22 @@ class AngleCollector extends PDFTextStripper
  */
 class FilteredTextStripper extends PDFTextStripper
 {
-    FilteredTextStripper() throws IOException
+    @Override
+    protected void processTextPosition(TextPosition text)
     {
+        int angle = ExtractText.getAngle(text);
+        if (angle == 0)
+        {
+            super.processTextPosition(text);
+        }
     }
+}
 
+/**
+ * PDFText2Markdown that only processes glyphs that have angle 0.
+ */
+class FilteredText2Markdown extends PDFText2Markdown
+{
     @Override
     protected void processTextPosition(TextPosition text)
     {

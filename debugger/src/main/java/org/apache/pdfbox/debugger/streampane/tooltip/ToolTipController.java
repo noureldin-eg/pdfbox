@@ -22,8 +22,8 @@ import java.util.List;
 import javax.swing.text.BadLocationException;
 import javax.swing.text.JTextComponent;
 import javax.swing.text.Utilities;
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
 import org.apache.pdfbox.contentstream.operator.OperatorName;
 import org.apache.pdfbox.pdmodel.PDResources;
 
@@ -38,7 +38,7 @@ interface ToolTip
  */
 public class ToolTipController
 {
-    private static final Log LOG = LogFactory.getLog(ToolTipController.class);
+    private static final Logger LOG = LogManager.getLogger(ToolTipController.class);
 
     private final PDResources resources;
     private JTextComponent textComponent;
@@ -132,7 +132,7 @@ public class ToolTipController
         {
             while (offset != -1)
             {
-                offset = Utilities.getPositionAbove(textComponent, offset, 0);
+                offset = Utilities.getPositionAbove(textComponent, offset, 0f);
                 String previousRowText = getRowText(offset);
                 if (previousRowText == null)
                 {

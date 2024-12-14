@@ -20,10 +20,11 @@ import java.awt.geom.AffineTransform;
 import java.io.IOException;
 import java.lang.ref.WeakReference;
 import java.util.Map;
+import java.util.Objects;
 import java.util.WeakHashMap;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
 
 import org.apache.pdfbox.cos.COSDictionary;
 import org.apache.pdfbox.pdmodel.graphics.color.PDColor;
@@ -38,7 +39,7 @@ import org.apache.pdfbox.util.Matrix;
  */
 class TilingPaintFactory
 {
-    private static final Log LOG = LogFactory.getLog(TilingPaintFactory.class);
+    private static final Logger LOG = LogManager.getLogger(TilingPaintFactory.class);
 
     private final PageDrawer drawer;
     private final Map<TilingPaintParameter, WeakReference<Paint>> weakCache
@@ -103,15 +104,15 @@ class TilingPaintFactory
                 return false;
             }
             final TilingPaintParameter other = (TilingPaintParameter) obj;
-            if (this.matrix != other.matrix && (this.matrix == null || !this.matrix.equals(other.matrix)))
+            if (!Objects.equals(this.matrix, other.matrix))
             {
                 return false;
             }
-            if (this.patternDict != other.patternDict && (this.patternDict == null || !this.patternDict.equals(other.patternDict)))
+            if (!Objects.equals(this.patternDict, other.patternDict))
             {
                 return false;
             }
-            if (this.colorSpace != other.colorSpace && (this.colorSpace == null || !this.colorSpace.equals(other.colorSpace)))
+            if (!Objects.equals(this.colorSpace, other.colorSpace))
             {
                 return false;
             }
@@ -140,7 +141,7 @@ class TilingPaintFactory
                 LOG.debug("Couldn't convert color to RGB - treating as not equal", ex);
                 return false;
             }
-            return !(this.xform != other.xform && (this.xform == null || !this.xform.equals(other.xform)));
+            return Objects.equals(this.xform, other.xform);
         }
 
         @Override

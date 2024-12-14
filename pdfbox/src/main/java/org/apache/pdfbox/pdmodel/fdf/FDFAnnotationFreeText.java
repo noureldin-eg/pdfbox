@@ -21,8 +21,8 @@ import javax.xml.xpath.XPath;
 import javax.xml.xpath.XPathExpressionException;
 import javax.xml.xpath.XPathFactory;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
 import org.apache.pdfbox.cos.COSArray;
 import org.apache.pdfbox.cos.COSDictionary;
 import org.apache.pdfbox.cos.COSName;
@@ -36,7 +36,7 @@ import org.w3c.dom.Element;
  */
 public class FDFAnnotationFreeText extends FDFAnnotation
 {
-    private static final Log LOG = LogFactory.getLog(FDFAnnotationFreeText.class);
+    private static final Logger LOG = LogManager.getLogger(FDFAnnotationFreeText.class);
  
     /**
      * COS Model value for SubType entry.
@@ -143,9 +143,7 @@ public class FDFAnnotationFreeText extends FDFAnnotation
      */
     public final void setCallout(float[] callout)
     {
-        COSArray newCallout = new COSArray();
-        newCallout.setFloatArray(callout);
-        annot.setItem(COSName.CL, newCallout);
+        annot.setItem(COSName.CL, COSArray.of(callout));
     }
 
     /**

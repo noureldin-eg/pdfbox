@@ -37,8 +37,8 @@ import java.util.SortedSet;
 import java.util.TimeZone;
 import java.util.TreeMap;
 import java.util.TreeSet;
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 /**
  * Subsetter for TrueType (TTF) fonts.
@@ -50,9 +50,11 @@ import org.apache.commons.logging.LogFactory;
  */
 public final class TTFSubsetter
 {
-    private static final Log LOG = LogFactory.getLog(TTFSubsetter.class);
+    private static final Logger LOG = LogManager.getLogger(TTFSubsetter.class);
     
-    private static final byte[] PAD_BUF = new byte[] { 0, 0, 0 };
+    private static final byte[] PAD_BUF = { 0, 0, 0 };
+
+    private static final TimeZone TIMEZONE_UTC = TimeZone.getTimeZone("UTC"); // clone before using
 
     private final TrueTypeFont ttf;
     private final CmapLookup unicodeCmap;
@@ -375,22 +377,24 @@ public final class TTFSubsetter
         DataOutputStream out = new DataOutputStream(bos);
 
         MaximumProfileTable p = ttf.getMaximumProfile();
-        writeFixed(out, 1.0);
+        writeFixed(out, p.getVersion());
         writeUint16(out, glyphIds.size());
-        writeUint16(out, p.getMaxPoints());
-        writeUint16(out, p.getMaxContours());
-        writeUint16(out, p.getMaxCompositePoints());
-        writeUint16(out, p.getMaxCompositeContours());
-        writeUint16(out, p.getMaxZones());
-        writeUint16(out, p.getMaxTwilightPoints());
-        writeUint16(out, p.getMaxStorage());
-        writeUint16(out, p.getMaxFunctionDefs());
-        writeUint16(out, p.getMaxInstructionDefs());
-        writeUint16(out, p.getMaxStackElements());
-        writeUint16(out, p.getMaxSizeOfInstructions());
-        writeUint16(out, p.getMaxComponentElements());
-        writeUint16(out, p.getMaxComponentDepth());
-
+        if (p.getVersion() >= 1.0f)
+        {
+            writeUint16(out, p.getMaxPoints());
+            writeUint16(out, p.getMaxContours());
+            writeUint16(out, p.getMaxCompositePoints());
+            writeUint16(out, p.getMaxCompositeContours());
+            writeUint16(out, p.getMaxZones());
+            writeUint16(out, p.getMaxTwilightPoints());
+            writeUint16(out, p.getMaxStorage());
+            writeUint16(out, p.getMaxFunctionDefs());
+            writeUint16(out, p.getMaxInstructionDefs());
+            writeUint16(out, p.getMaxStackElements());
+            writeUint16(out, p.getMaxSizeOfInstructions());
+            writeUint16(out, p.getMaxComponentElements());
+            writeUint16(out, p.getMaxComponentDepth());
+        }
         out.flush();
         return bos.toByteArray();
     }
@@ -480,15 +484,15 @@ public final class TTFSubsetter
         long[] offsets = ttf.getIndexToLocation().getOffsets();
         do
         {
-            InputStream is = ttf.getOriginalData();
             Set<Integer> glyphIdsToAdd = null;
-            try
+            try (InputStream is = ttf.getOriginalData())
             {
                 long isResult = is.skip(g.getOffset());
-                
+
                 if (Long.compare(isResult, g.getOffset()) != 0)
                 {
-                    LOG.debug("Tried skipping " + g.getOffset() + " bytes but skipped only " + isResult + " bytes");
+                    LOG.debug("Tried skipping {} bytes but skipped only {} bytes", g.getOffset(),
+                            isResult);
                 }
 
                 long lastOff = 0L;
@@ -500,7 +504,8 @@ public final class TTFSubsetter
                     
                     if (Long.compare(isResult, offset - lastOff) != 0)
                     {
-                        LOG.debug("Tried skipping " + (offset - lastOff) + " bytes but skipped only " + isResult + " bytes");
+                        LOG.debug("Tried skipping {} bytes but skipped only {} bytes",
+                                offset - lastOff, isResult);
                     }
 
                     byte[] buf = new byte[(int)len];
@@ -508,7 +513,7 @@ public final class TTFSubsetter
 
                     if (Long.compare(isResult, len) != 0)
                     {
-                        LOG.debug("Tried reading " + len + " bytes but only " + isResult + " bytes read");
+                        LOG.debug("Tried reading {} bytes but only {} bytes read", len, isResult);
                     }
                     
                     // rewrite glyphIds for compound glyphs
@@ -561,15 +566,11 @@ public final class TTFSubsetter
                     lastOff = offsets[glyphId + 1];
                 }
             }
-            finally
-            {
-                is.close();
-            }
-            if (glyphIdsToAdd != null)
+            hasNested = glyphIdsToAdd != null;
+            if (hasNested)
             {
                 glyphIds.addAll(glyphIdsToAdd);
             }
-            hasNested = glyphIdsToAdd != null;
         }
         while (hasNested);
     }
@@ -587,7 +588,8 @@ public final class TTFSubsetter
 
             if (Long.compare(isResult, g.getOffset()) != 0)
             {
-                LOG.debug("Tried skipping " + g.getOffset() + " bytes but skipped only " + isResult + " bytes");
+                LOG.debug("Tried skipping {} bytes but skipped only {} bytes", g.getOffset(),
+                        isResult);
             }
 
             long prevEnd = 0;    // previously read glyph offset
@@ -605,7 +607,8 @@ public final class TTFSubsetter
 
                 if (Long.compare(isResult, offset - prevEnd) != 0)
                 {
-                    LOG.debug("Tried skipping " + (offset - prevEnd) + " bytes but skipped only " + isResult + " bytes");
+                    LOG.debug("Tried skipping {} bytes but skipped only {} bytes", offset - prevEnd,
+                            isResult);
                 }
 
                 byte[] buf = new byte[(int)length];
@@ -613,7 +616,7 @@ public final class TTFSubsetter
 
                 if (Long.compare(isResult, length) != 0)
                 {
-                    LOG.debug("Tried reading " + length + " bytes but only " + isResult + " bytes read");
+                    LOG.debug("Tried reading {} bytes but only {} bytes read", length, isResult);
                 }
 
                 // detect glyph type
@@ -833,7 +836,8 @@ public final class TTFSubsetter
     private byte[] buildPostTable() throws IOException
     {
         PostScriptTable post = ttf.getPostScript();
-        if (post == null || keepTables != null && !keepTables.contains(PostScriptTable.TAG))
+        if (post == null || post.getGlyphNames() == null || 
+                keepTables != null && !keepTables.contains(PostScriptTable.TAG))
         {
             return null;
         }
@@ -906,7 +910,8 @@ public final class TTFSubsetter
 
             if (Long.compare(isResult, hm.getOffset()) != 0)
             {
-                LOG.debug("Tried skipping " + hm.getOffset() + " bytes but only " + isResult + " bytes skipped");
+                LOG.debug("Tried skipping {} bytes but only {} bytes skipped", hm.getOffset(),
+                        isResult);
             }
 
             long lastOffset = 0;
@@ -1087,7 +1092,7 @@ public final class TTFSubsetter
     private void writeLongDateTime(DataOutputStream out, Calendar calendar) throws IOException
     {
         // inverse operation of TTFDataStream.readInternationalDate()
-        Calendar cal = Calendar.getInstance(TimeZone.getTimeZone("UTC"));
+        Calendar cal = Calendar.getInstance((TimeZone) TIMEZONE_UTC.clone());
         cal.set(1904, 0, 1, 0, 0, 0);
         cal.set(Calendar.MILLISECOND, 0);
         long millisFor1904 = cal.getTimeInMillis();

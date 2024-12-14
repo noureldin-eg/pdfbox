@@ -43,7 +43,7 @@ public final class OverlayPDF implements Callable<Integer>
 {
     // Expected for CLI app to write to System.out/System.err
     @SuppressWarnings("squid:S106")
-    private static final PrintStream SYSERR = System.err;
+    private final PrintStream SYSERR;
 
     @Option(names = "-odd", description = "overlay file used for odd pages")
     private File oddPageOverlay;
@@ -66,7 +66,7 @@ public final class OverlayPDF implements Callable<Integer>
     @Option(names = {"-default"}, description = "the default overlay file")
     private File defaultOverlay;
 
-    @Option(names = "-position", description = "where to put the overlay file: foreground or background (default: ${DEFAULT-VALUE})")    
+    @Option(names = "-position", description = "where to put the overlay file: FOREGROUND or BACKGROUND (default: ${DEFAULT-VALUE})")    
     private Position position = Position.BACKGROUND;
 
     @Option(names = {"-i", "--input"}, description = "the PDF input file", required = true)
@@ -74,6 +74,14 @@ public final class OverlayPDF implements Callable<Integer>
 
     @Option(names = {"-o", "--output"}, description = "the PDF output file", required = true)
     private File outfile;
+
+    /**
+     * Constructor.
+     */
+    public OverlayPDF()
+    {
+        SYSERR = System.err;
+    }
 
     /**
      * This will overlay a document and write out the results.
@@ -90,6 +98,7 @@ public final class OverlayPDF implements Callable<Integer>
     }
 
 
+    @Override
     public Integer call()
     {
         int retcode = 0;
@@ -120,6 +129,16 @@ public final class OverlayPDF implements Callable<Integer>
         if (useAllPages != null)
         {
             overlayer.setAllPagesOverlayFile(useAllPages.getAbsolutePath());
+        }
+
+        if (defaultOverlay != null)
+        {
+            overlayer.setDefaultOverlayFile(defaultOverlay.getAbsolutePath());
+        }
+
+        if (infile != null)
+        {
+            overlayer.setInputFile(infile.getAbsolutePath());
         }
 
 

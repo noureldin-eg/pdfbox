@@ -23,8 +23,9 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import java.util.StringJoiner;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
 import org.apache.pdfbox.cos.COSArray;
 import org.apache.pdfbox.cos.COSBase;
 import org.apache.pdfbox.cos.COSDictionary;
@@ -41,7 +42,7 @@ import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject;
  */
 public class Stream
 {
-    private static final Log LOG = LogFactory.getLog(Stream.class);
+    private static final Logger LOG = LogManager.getLogger(Stream.class);
 
     public static final String DECODED = "Decoded (Plain Text)";
     public static final String IMAGE = "Image";
@@ -105,25 +106,21 @@ public class Stream
      */
     private String getFilteredLabel()
     {
-        StringBuilder sb = new StringBuilder();
+        StringJoiner sj = new StringJoiner(", ", "Encoded (", ")");
         COSBase base = strm.getFilters();
         if (base instanceof COSName)
         {
-            sb.append(((COSName) base).getName());
+            sj.add(((COSName) base).getName());
         }
         else if (base instanceof COSArray)
         {
             COSArray filterArray = (COSArray) base;
             for (int i = 0; i < filterArray.size(); i++)
             {
-                if (i > 0)
-                {
-                    sb.append(", ");
-                }
-                sb.append(((COSName) filterArray.get(i)).getName());
+                sj.add(((COSName) filterArray.get(i)).getName());
             }
         }
-        return "Encoded (" + sb.toString() + ")";
+        return sj.toString();
     }
 
     /**
@@ -218,7 +215,7 @@ public class Stream
         }
         nameListBuilder.delete(nameListBuilder.lastIndexOf("&"), nameListBuilder.length());
 
-        return "Keep " + nameListBuilder.toString() + "...";
+        return "Keep " + nameListBuilder + "...";
     }
 
     private List<String> getStopFilterList(final int stopFilterIndex)

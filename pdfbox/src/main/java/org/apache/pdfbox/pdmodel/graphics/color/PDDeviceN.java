@@ -24,6 +24,7 @@ import java.awt.image.DataBuffer;
 import java.awt.image.Raster;
 import java.awt.image.WritableRaster;
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -100,10 +101,7 @@ public class PDDeviceN extends PDSpecialColorSpace
         // set initial color space
         int n = getNumberOfComponents();
         float[] initial = new float[n];
-        for (int i = 0; i < n; i++)
-        {
-            initial[i] = 1;
-        }
+        Arrays.fill(initial, 1);
         initialColor = new PDColor(initial, this);
     }
 
@@ -122,11 +120,6 @@ public class PDDeviceN extends PDSpecialColorSpace
 
         // process components
         colorantToComponent = new int[numColorants];
-        for (int c = 0; c < numColorants; c++)
-        {
-            colorantToComponent[c] = -1;
-        }
-
         if (attributes.getProcess() != null)
         {
             List<String> components = attributes.getProcess().getComponents();
@@ -139,6 +132,13 @@ public class PDDeviceN extends PDSpecialColorSpace
 
             // process color space
             processColorSpace = attributes.getProcess().getColorSpace();
+        }
+        else
+        {
+            for (int c = 0; c < numColorants; c++)
+            {
+                colorantToComponent[c] = -1;
+            }
         }
 
         // spot colorants
@@ -223,12 +223,13 @@ public class PDDeviceN extends PDSpecialColorSpace
                 componentColorSpace = spotColorSpaces[c];
             }
 
+            int numberOfComponents = componentColorSpace.getNumberOfComponents();
             // copy single-component to its own raster in the component color space
             WritableRaster componentRaster = Raster.createBandedRaster(DataBuffer.TYPE_BYTE,
-                width, height, componentColorSpace.getNumberOfComponents(), new Point(0, 0));
+                width, height, numberOfComponents, new Point(0, 0));
 
             int[] samples = new int[numColorants];
-            int[] componentSamples = new int[componentColorSpace.getNumberOfComponents()];
+            int[] componentSamples = new int[numberOfComponents];
             boolean isProcessColorant = colorantToComponent[c] >= 0;
             int componentIndex = colorantToComponent[c];
             for (int y = 0; y < height; y++)
@@ -357,7 +358,7 @@ public class PDDeviceN extends PDSpecialColorSpace
 
     private float[] toRGBWithAttributes(float[] value) throws IOException
     {
-        float[] rgbValue = new float[] { 1, 1, 1 };
+        float[] rgbValue = { 1, 1, 1 };
 
         // look up each colorant
         for (int c = 0; c < numColorants; c++)

@@ -20,8 +20,9 @@ import java.text.Normalizer;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import java.util.Objects;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
 import org.apache.pdfbox.pdmodel.font.PDFont;
 import org.apache.pdfbox.util.Matrix;
 
@@ -32,7 +33,7 @@ import org.apache.pdfbox.util.Matrix;
  */
 public final class TextPosition
 {
-    private static final Log LOG = LogFactory.getLog(TextPosition.class);
+    private static final Logger LOG = LogManager.getLogger(TextPosition.class);
 
     private static final Map<Integer, String> DIACRITICS = createDiacritics();
 
@@ -168,6 +169,42 @@ public final class TextPosition
     public String getUnicode()
     {
         return unicode;
+    }
+
+    void setUnicode(String unicode)
+    {
+        this.unicode = unicode;
+    }
+
+    /**
+     * Same as {@link #getUnicode()} except that returned text is ensured to be
+     * visually ordered (i.e. same order you would see them displayed on screen when
+     * looking from left to right). This is important for Arabic/Hebrew where several
+     * unicode characters can be composed in one glyph with logical order (the order
+     * in which it would be normally typed from right to left).
+     * 
+     * @return The string on the screen in visual order.
+     */
+    public String getVisuallyOrderedUnicode()
+    {
+        final String text = getUnicode();
+        final int length = text.length();
+        int nextIndex;
+        for (int index = 0; index < length; index = nextIndex)
+        {
+            int codePoint = text.codePointAt(index);
+            nextIndex = index + Character.charCount(codePoint);
+            byte directionality = Character.getDirectionality(codePoint);
+            if ((directionality == Character.DIRECTIONALITY_RIGHT_TO_LEFT_ARABIC ||
+                    directionality == Character.DIRECTIONALITY_RIGHT_TO_LEFT)
+                    // Even if the directionality is right to left, still there is no need to
+                    // reverse a single code-point
+                    && (index != 0 || nextIndex < length))
+            {
+                return new StringBuilder(text).reverse().toString();
+            }
+        }
+        return text;
     }
 
     /**
@@ -647,8 +684,9 @@ public final class TextPosition
         {
             if (i >= widths.length)
             {
-                LOG.info("diacritic " + diacritic.getUnicode() + " on ligature " + unicode + 
-                        " is not supported yet and is ignored (PDFBOX-2831)");
+                LOG.info(
+                        "diacritic {} on ligature {} is not supported yet and is ignored (PDFBOX-2831)",
+                        diacritic.getUnicode(), unicode);
                 break;
             }
             float currCharXEnd = currCharXStart + widths[i];
@@ -909,7 +947,7 @@ public final class TextPosition
         {
             return false;
         }
-        if (textMatrix != null ? !textMatrix.equals(that.textMatrix) : that.textMatrix != null)
+        if (!Objects.equals(textMatrix, that.textMatrix))
         {
             return false;
         }
@@ -917,7 +955,7 @@ public final class TextPosition
         {
             return false;
         }
-        return font != null ? font.equals(that.font) : that.font == null;
+        return Objects.equals(font, that.font);
         
         // If changing this method, do not compare mutable fields (PDFBOX-4701)        
     }

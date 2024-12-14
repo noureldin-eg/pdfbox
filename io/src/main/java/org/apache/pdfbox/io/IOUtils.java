@@ -27,7 +27,6 @@ import static java.lang.invoke.MethodHandles.lookup;
 import static java.lang.invoke.MethodType.methodType;
 import static java.util.Objects.nonNull;
 
-import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
 import java.io.IOException;
 import java.io.InputStream;
@@ -44,8 +43,8 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Consumer;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
 import org.apache.pdfbox.io.RandomAccessStreamCache.StreamCacheCreateFunction;
 
 /**
@@ -53,6 +52,12 @@ import org.apache.pdfbox.io.RandomAccessStreamCache.StreamCacheCreateFunction;
  */
 public final class IOUtils
 {
+    /**
+     * Log instance.
+     */
+    private static final Logger LOG = LogManager.getLogger(IOUtils.class);
+
+    private static final StreamCacheCreateFunction streamCache = RandomAccessStreamCacheImpl::new;
 
     //TODO PDFBox should really use Apache Commons IO.
     private static final Optional<Consumer<ByteBuffer>> UNMAPPER;
@@ -62,11 +67,6 @@ public final class IOUtils
         UNMAPPER = Optional.ofNullable(AccessController
                 .doPrivileged((PrivilegedAction<Consumer<ByteBuffer>>) IOUtils::unmapper));
     }
-
-    /**
-     * Log instance.
-     */
-    private static final Log LOG = LogFactory.getLog(IOUtils.class);
 
     private IOUtils()
     {
@@ -78,12 +78,12 @@ public final class IOUtils
      * @param in the input stream to read from.
      * @return the byte array
      * @throws IOException if an I/O error occurs
+     * @deprecated use {@link InputStream#readAllBytes()} instead
      */
+    @Deprecated(since="4.0.0", forRemoval=true)
     public static byte[] toByteArray(InputStream in) throws IOException
     {
-        ByteArrayOutputStream baout = new ByteArrayOutputStream();
-        copy(in, baout);
-        return baout.toByteArray();
+        return in.readAllBytes();
     }
 
     /**
@@ -92,18 +92,12 @@ public final class IOUtils
      * @param output the output stream
      * @return the number of bytes that have been copied
      * @throws IOException if an I/O error occurs
+     * @deprecated use {@link InputStream#transferTo(OutputStream)} instead
      */
+    @Deprecated(since="4.0.0", forRemoval=true)
     public static long copy(InputStream input, OutputStream output) throws IOException
     {
-        byte[] buffer = new byte[4096];
-        long count = 0;
-        int n = 0;
-        while (-1 != (n = input.read(buffer)))
-        {
-            output.write(buffer, 0, n);
-            count += n;
-        }
-        return count;
+        return input.transferTo(output);
     }
 
     /**
@@ -114,21 +108,12 @@ public final class IOUtils
      * @param buffer the buffer to fill
      * @return the number of bytes written to the buffer
      * @throws IOException if an I/O error occurs
+     * @deprecated use {@link InputStream#readNBytes(byte[], int, int)} or {@link InputStream#readNBytes(int)} instead
      */
+    @Deprecated(since="4.0.0", forRemoval=true)
     public static long populateBuffer(InputStream in, byte[] buffer) throws IOException
     {
-        int remaining = buffer.length;
-        while (remaining > 0)
-        {
-            int bufferWritePos = buffer.length - remaining;
-            int bytesRead = in.read(buffer, bufferWritePos, remaining);
-            if (bytesRead < 0)
-            {
-                break; //EOD
-            }
-            remaining -= bytesRead;
-        }
-        return buffer.length - remaining;
+        return in.readNBytes(buffer, 0, buffer.length);
     }
 
     /**
@@ -154,9 +139,9 @@ public final class IOUtils
 
     /**
      * Try to close an IO resource and log and return if there was an exception.
-     *  
+     *
      * <p>An exception is only returned if the IOException passed in is null.
-     * 
+     *
      * @param closeable to be closed
      * @param logger the logger to be used so that logging appears under that log instance
      * @param resourceName the name to appear in the log output
@@ -164,7 +149,7 @@ public final class IOUtils
      * exception while closing the IO resource
      * @return the IOException is there was any but only if initialException is null
      */
-    public static IOException closeAndLogException(Closeable closeable, Log logger, String resourceName, IOException initialException)
+    public static IOException closeAndLogException(Closeable closeable, Logger logger, String resourceName, IOException initialException)
     {
         try
         {
@@ -172,7 +157,7 @@ public final class IOUtils
         }
         catch (IOException ioe)
         {
-            logger.warn("Error closing " + resourceName, ioe);
+            logger.warn("Error closing {}", resourceName, ioe);
             if (initialException == null)
             {
                 return ioe;
@@ -193,7 +178,10 @@ public final class IOUtils
     {
         try
         {
-            UNMAPPER.ifPresent(u -> u.accept(buf));
+            if (buf != null)
+            {
+                UNMAPPER.ifPresent(u -> u.accept(buf));
+            }
         }
         catch (Exception e)
         {
@@ -310,13 +298,13 @@ public final class IOUtils
 
     /**
      * Provides a function to create an instance of a memory only StreamCache using unrestricted main memory.
-     * ScratchFile is used as current default implementation.
+     * RandomAccessReadWriteBuffer is used as current default implementation.
      * 
      * @return a function to create an instance of a memory only StreamCache using unrestricted main memory
      */
     public static StreamCacheCreateFunction createMemoryOnlyStreamCache()
     {
-        return MemoryUsageSetting.setupMainMemoryOnly().streamCache;
+        return streamCache;
     }
 
     /**

@@ -21,15 +21,15 @@ import java.io.Closeable;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
+
 import org.apache.fontbox.FontBoxFont;
 import org.apache.fontbox.ttf.model.GsubData;
 import org.apache.fontbox.util.BoundingBox;
@@ -42,11 +42,12 @@ import org.apache.fontbox.util.BoundingBox;
 public class TrueTypeFont implements FontBoxFont, Closeable
 {
 
-    private static final Log LOG = LogFactory.getLog(TrueTypeFont.class);
+    private static final Logger LOG = LogManager.getLogger(TrueTypeFont.class);
 
     private float version;
     private int numberOfGlyphs = -1;
     private int unitsPerEm = -1;
+    private boolean enableGsub = true;
     protected final Map<String,TTFTable> tables = new HashMap<>();
     private final TTFDataStream data;
     private volatile Map<String, Integer> postScriptNames;
@@ -71,18 +72,10 @@ public class TrueTypeFont implements FontBoxFont, Closeable
         data.close();
     }
 
-    @Override
-    protected void finalize() throws Throwable
-    {
-        super.finalize();
-        // PDFBOX-4963: risk of memory leaks due to SoftReference in FontCache 
-        close();
-    }
-
     /**
      * @return Returns the version.
      */
-    public float getVersion() 
+    public float getVersion()
     {
         return version;
     }
@@ -95,7 +88,24 @@ public class TrueTypeFont implements FontBoxFont, Closeable
     {
         version = versionValue;
     }
-    
+
+    /**
+     * @return Returns true if the GSUB table can be used for this font
+     */
+    public boolean isEnableGsub()
+    {
+        return enableGsub;
+    }
+
+    /**
+     * Enable or disable the GSUB table for this font.
+     * GSUB table is enabled by default.
+     */
+    public void setEnableGsub(boolean enableGsub)
+    {
+        this.enableGsub = enableGsub;
+    }
+
     /**
      * Add a table definition. Package-private, used by TTFParser only.
      * 
@@ -166,6 +176,32 @@ public class TrueTypeFont implements FontBoxFont, Closeable
             readTable(table);
         }
         return table;
+    }
+
+    /**
+     * Returns the raw bytes of the given table, no more than {@code limit} bytes.
+     * 
+     * @param table the table to read.
+     * @param limit maximum length of array to return
+     * @return the raw bytes of the given table
+     * 
+     * @throws IOException if there was an error accessing the table.
+     */
+    public byte[] getTableNBytes(TTFTable table, int limit) throws IOException
+    {
+        synchronized (lockReadtable)
+        {
+            // save current position
+            long currentPosition = data.getCurrentPosition();
+            data.seek(table.getOffset());
+
+            // read all data
+            byte[] bytes = data.read(Math.min(limit, (int) table.getLength()));
+
+            // restore current position
+            data.seek(currentPosition);
+            return bytes;
+        }
     }
 
     /**
@@ -373,6 +409,28 @@ public class TrueTypeFont implements FontBoxFont, Closeable
         table.read(this, data);
         // restore current position
         data.seek(currentPosition);
+    }
+
+    /**
+     * Read the given table headers. Package-private, used by TTFParser only.
+     * 
+     * @param tag the name of the table to be read
+     * @param outHeaders consumes headers
+     * 
+     * @throws IOException if there was an error reading the table.
+     */
+    void readTableHeaders(String tag, FontHeaders outHeaders) throws IOException
+    {
+        TTFTable table = tables.get(tag);
+        if (table != null)
+        {
+            // save current position
+            long currentPosition = data.getCurrentPosition();
+            data.seek(table.getOffset());
+            table.readHeaders(this, data, outHeaders);
+            // restore current position
+            data.seek(currentPosition);
+        }
     }
 
     /**
@@ -633,20 +691,30 @@ public class TrueTypeFont implements FontBoxFont, Closeable
             CmapLookup cmap = getUnicodeCmapLookup(false);
             return cmap.getGlyphId(uni);
         }
-        
+
+        // PDFBOX-5604: assume gnnnnn is a gid
+        if (name.matches("g\\d+"))
+        {
+            return Integer.parseInt(name.substring(1));
+        }
+
         return 0;
     }
 
     /**
      * Returns the GSubData of the GlyphSubstitutionTable if present.
      * 
-     * @return the GSubData of the GlyphSubstitutionTable or {@link GsubData#NO_DATA_FOUND} if either no GSUB data is
-     * available or its scripts are not supported
-     * 
+     * @return the GSubData of the GlyphSubstitutionTable or {@link GsubData#NO_DATA_FOUND} if no GSUB data is
+     * available, its scripts are not supported or it was disabled for that font
      * @throws IOException if the font data could not be read
      */
     public GsubData getGsubData() throws IOException
     {
+        if (!enableGsub)
+        {
+            return GsubData.NO_DATA_FOUND;
+        }
+
         GlyphSubstitutionTable table = getGsub();
         if (table == null)
         {
@@ -676,7 +744,7 @@ public class TrueTypeFont implements FontBoxFont, Closeable
                     }
                 }
                 String unicode = uniStr.toString();
-                if (unicode.length() == 0)
+                if (unicode.isEmpty())
                 {
                     return -1;
                 }
@@ -737,7 +805,7 @@ public class TrueTypeFont implements FontBoxFont, Closeable
     public List<Number> getFontMatrix() throws IOException
     {
         float scale = 1000f / getUnitsPerEm();
-        return Arrays.<Number>asList(0.001f * scale, 0, 0, 0.001f * scale, 0, 0);
+        return List.of(0.001f * scale, 0, 0, 0.001f * scale, 0, 0);
     }
 
     /**

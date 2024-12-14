@@ -26,8 +26,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
 import org.apache.fontbox.ttf.GlyphData;
 import org.apache.fontbox.ttf.GlyphTable;
 import org.apache.fontbox.ttf.HorizontalMetricsTable;
@@ -51,7 +51,7 @@ import org.apache.pdfbox.pdmodel.common.PDStream;
 final class PDCIDFontType2Embedder extends TrueTypeEmbedder
 {
 
-    private static final Log LOG = LogFactory.getLog(PDCIDFontType2Embedder.class);
+    private static final Logger LOG = LogManager.getLogger(PDCIDFontType2Embedder.class);
 
     private final PDDocument document;
     private final PDType0Font parent;
@@ -284,11 +284,11 @@ final class PDCIDFontType2Embedder extends TrueTypeEmbedder
         COSArray ws = new COSArray();
         int prev = Integer.MIN_VALUE;
         // Use a sorted list to get an optimal width array  
-        Set<Integer> keys = cidToGid.keySet();
         HorizontalMetricsTable horizontalMetricsTable = ttf.getHorizontalMetrics();
-        for (int cid : keys)
+        for (Map.Entry<Integer, Integer> entry : cidToGid.entrySet())
         {
-            int gid = cidToGid.get(cid);
+            int cid = entry.getKey();
+            int gid = entry.getValue();
             long width = Math.round(horizontalMetricsTable.getAdvanceWidth(gid) * scaling);
             if (width == 1000)
             {

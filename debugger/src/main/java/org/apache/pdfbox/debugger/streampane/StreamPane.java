@@ -52,8 +52,8 @@ import javax.xml.transform.TransformerFactory;
 import javax.xml.transform.TransformerFactoryConfigurationError;
 import javax.xml.transform.dom.DOMSource;
 import javax.xml.transform.stream.StreamResult;
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
 import org.apache.pdfbox.contentstream.operator.Operator;
 import org.apache.pdfbox.contentstream.operator.OperatorName;
 import org.apache.pdfbox.cos.COSArray;
@@ -68,7 +68,6 @@ import org.apache.pdfbox.cos.COSStream;
 import org.apache.pdfbox.cos.COSString;
 import org.apache.pdfbox.debugger.hexviewer.HexView;
 import org.apache.pdfbox.debugger.streampane.tooltip.ToolTipController;
-import org.apache.pdfbox.io.IOUtils;
 import org.apache.pdfbox.pdfparser.PDFStreamParser;
 import org.apache.pdfbox.pdmodel.PDResources;
 import org.apache.pdfbox.util.XMLUtil;
@@ -81,7 +80,7 @@ import org.w3c.dom.Document;
  */
 public class StreamPane implements ActionListener
 {
-    private static final Log LOG = LogFactory.getLog(StreamPane.class);
+    private static final Logger LOG = LogManager.getLogger(StreamPane.class);
 
     private static final StyleContext CONTEXT = StyleContext.getDefaultStyleContext();
     private static final Style OPERATOR_STYLE = CONTEXT.addStyle("operator", null);
@@ -264,7 +263,7 @@ public class StreamPane implements ActionListener
                 JOptionPane.showMessageDialog(panel, command + " text not available (filter missing?)");
                 return;
             }
-            hexView.changeData(IOUtils.toByteArray(is));
+            hexView.changeData(is.readAllBytes());
         }
     }
 
@@ -333,7 +332,7 @@ public class StreamPane implements ActionListener
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
             try
             {
-                IOUtils.copy(in, baos);
+                in.transferTo(baos);
                 return baos.toString(encoding);
             }
             catch (IOException e)
@@ -355,7 +354,7 @@ public class StreamPane implements ActionListener
                 // replace the remaining CRs with LF
                 if (data != null)
                 {
-                    data = data.replace("\r\n", "\n").replace('\r', '\n');
+                    data = data.replaceAll("\\R", "\n");
                 }
 
                 try
@@ -407,7 +406,7 @@ public class StreamPane implements ActionListener
             PDFStreamParser parser;
             try
             {
-                parser = new PDFStreamParser(IOUtils.toByteArray(inputStream));
+                parser = new PDFStreamParser(inputStream.readAllBytes());
                 parser.parse().forEach(obj -> writeToken(obj, docu));
             }
             catch (IOException e)

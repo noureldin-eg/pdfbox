@@ -39,7 +39,6 @@ import org.apache.pdfbox.cos.COSDictionary;
 import org.apache.pdfbox.cos.COSName;
 import org.apache.pdfbox.cos.COSObject;
 import org.apache.pdfbox.cos.COSStream;
-import org.apache.pdfbox.io.IOUtils;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDPageTree;
@@ -205,14 +204,14 @@ public class Overlay implements Closeable
 
     private void loadPDFs() throws IOException
     {
-        if (inputPDFDocument == null)
-        {
-            throw new IllegalArgumentException("No input document");
-        }
         // input PDF
         if (inputFileName != null)
         {
             inputPDFDocument = loadPDF(inputFileName);
+        }
+        if (inputPDFDocument == null)
+        {
+            throw new IllegalArgumentException("No input document");
         }
         // default overlay PDF
         if (defaultOverlayFilename != null)
@@ -349,7 +348,7 @@ public class Overlay implements Closeable
             {
                 try (InputStream in = contentStream.createInputStream())
                 {
-                    IOUtils.copy(in, out);
+                    in.transferTo(out);
                     out.flush();
                 }
             }

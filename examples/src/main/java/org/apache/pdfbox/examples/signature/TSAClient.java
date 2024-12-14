@@ -29,9 +29,9 @@ import java.security.SecureRandom;
 import java.util.Base64;
 import java.util.Random;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
-import org.apache.pdfbox.io.IOUtils;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
+import org.apache.pdfbox.util.Hex;
 import org.bouncycastle.asn1.ASN1ObjectIdentifier;
 import org.bouncycastle.operator.DefaultDigestAlgorithmIdentifierFinder;
 import org.bouncycastle.operator.DigestAlgorithmIdentifierFinder;
@@ -40,6 +40,7 @@ import org.bouncycastle.tsp.TimeStampRequest;
 import org.bouncycastle.tsp.TimeStampRequestGenerator;
 import org.bouncycastle.tsp.TimeStampResponse;
 import org.bouncycastle.tsp.TimeStampToken;
+import org.bouncycastle.tsp.TimeStampTokenInfo;
 
 /**
  * Time Stamping Authority (TSA) Client [RFC 3161].
@@ -48,7 +49,7 @@ import org.bouncycastle.tsp.TimeStampToken;
  */
 public class TSAClient
 {
-    private static final Log LOG = LogFactory.getLog(TSAClient.class);
+    private static final Logger LOG = LogManager.getLogger(TSAClient.class);
 
     private static final DigestAlgorithmIdentifierFinder ALGORITHM_OID_FINDER =
             new DefaultDigestAlgorithmIdentifierFinder();
@@ -93,8 +94,8 @@ public class TSAClient
         }
         byte[] hash = digest.digest();
 
-        // 32-bit cryptographic nonce
-        int nonce = RANDOM.nextInt();
+        // 31-bit positive cryptographic nonce
+        int nonce = RANDOM.nextInt(Integer.MAX_VALUE);
 
         // generate TSA request
         TimeStampRequestGenerator tsaGenerator = new TimeStampRequestGenerator();
@@ -103,9 +104,10 @@ public class TSAClient
         TimeStampRequest request = tsaGenerator.generate(oid, hash, BigInteger.valueOf(nonce));
 
         // get TSA response
-        byte[] tsaResponse = getTSAResponse(request.getEncoded());
+        byte[] encodedRequest = request.getEncoded();
+        byte[] tsaResponse = getTSAResponse(encodedRequest);
 
-        TimeStampResponse response;
+        TimeStampResponse response = null;
         try
         {
             response = new TimeStampResponse(tsaResponse);
@@ -113,6 +115,26 @@ public class TSAClient
         }
         catch (TSPException e)
         {
+            // You can visualize the hex with an ASN.1 Decoder, e.g. http://ldh.org/asn1.html
+            LOG.error("request: {} ", () -> Hex.getString(encodedRequest));
+            if (response != null)
+            {
+                LOG.error("response: {}", () -> Hex.getString(tsaResponse));
+                // See https://github.com/bcgit/bc-java/blob/4a10c27a03bddd96cf0a3663564d0851425b27b9/pkix/src/main/java/org/bouncycastle/tsp/TimeStampResponse.java#L159
+                if ("response contains wrong nonce value.".equals(e.getMessage()))
+                {
+                    LOG.error("request nonce: {}", () -> request.getNonce().toString(16));
+                    if (response.getTimeStampToken() != null)
+                    {
+                        TimeStampTokenInfo tsi = response.getTimeStampToken().getTimeStampInfo();
+                        if (tsi != null && tsi.getNonce() != null)
+                        {
+                            // the nonce of the "wrong" test response is 0x3d3244ef
+                            LOG.error("response nonce: {}", () -> tsi.getNonce().toString(16));
+                        }
+                    }
+                }
+            }
             throw new IOException(e);
         }
 
@@ -161,7 +183,7 @@ public class TSAClient
         }
         catch (IOException ex)
         {
-            LOG.error("Exception when writing to " + this.url, ex);
+            LOG.error(() -> "Exception when writing to " + this.url, ex);
             throw ex;
         }
 
@@ -170,11 +192,11 @@ public class TSAClient
         byte[] response;
         try (InputStream input = connection.getInputStream())
         {
-            response = IOUtils.toByteArray(input);
+            response = input.readAllBytes();
         }
         catch (IOException ex)
         {
-            LOG.error("Exception when reading from " + this.url, ex);
+            LOG.error(() -> "Exception when reading from " + this.url, ex);
             throw ex;
         }
 

@@ -23,9 +23,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
-
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
 /**
  * This class represents a CMap file.
  *
@@ -33,7 +32,7 @@ import org.apache.commons.logging.LogFactory;
  */
 public class CMap
 {
-    private static final Log LOG = LogFactory.getLog(CMap.class);
+    private static final Logger LOG = LogManager.getLogger(CMap.class);
 
     private int wmode = 0;
     private String cmapName = null;
@@ -184,7 +183,7 @@ public class CMap
             {
                 sb.append(String.format("0x%02X (%04o) ", bytes[i], bytes[i]));
             }
-            LOG.warn("Invalid character code sequence " + sb + "in CMap " + cmapName);
+            LOG.warn("Invalid character code sequence {} in CMap {}", sb, cmapName);
         }
         // PDFBOX-4811 reposition to where we were after initial read
         if (in.markSupported())
@@ -193,8 +192,8 @@ public class CMap
         }
         else
         {
-            LOG.warn("mark() and reset() not supported, " + (maxCodeLength - 1) +
-                     " bytes have been skipped");
+            LOG.warn("mark() and reset() not supported, {} bytes have been skipped",
+                    maxCodeLength - 1);
         }
         return toInt(bytes, minCodeLength); // Adobe Reader behavior
     }
@@ -462,23 +461,16 @@ public class CMap
         cmap.codespaceRanges.forEach(this::addCodespaceRange);
         charToUnicodeOneByte.putAll(cmap.charToUnicodeOneByte);
         charToUnicodeTwoBytes.putAll(cmap.charToUnicodeTwoBytes);
-        cmap.charToUnicodeOneByte.entrySet().forEach(entry ->
-            unicodeToByteCodes.put(entry.getValue(), new byte[] {(byte) (entry.getKey() % 0xFF)}));
-        cmap.charToUnicodeTwoBytes.entrySet().forEach(entry ->
-        {
-            Integer key = entry.getKey();
-            unicodeToByteCodes.put(entry.getValue(), 
-                    new byte[] {(byte) ((key >>> 8) & 0xFF), (byte) (key & 0xFF)});
-        });
+        cmap.charToUnicodeOneByte.forEach((k, v) -> unicodeToByteCodes.put(v, new byte[]{(byte) (k % 0xFF)}));
+        cmap.charToUnicodeTwoBytes.forEach((k, v) -> unicodeToByteCodes.put(v,
+                new byte[]{(byte) ((k >>> 8) & 0xFF), (byte) (k & 0xFF)})
+        );
         cmap.codeToCid.forEach((key, value) ->
         {
-            if (codeToCid.containsKey(key))
+            Map<Integer, Integer> existingMapping = codeToCid.putIfAbsent(key, value);
+            if (existingMapping!=null)
             {
-                codeToCid.get(key).putAll(value);
-            }
-            else
-            {
-                codeToCid.put(key, value);
+                existingMapping.putAll(value);
             }
         });
         codeToCidRanges.addAll(cmap.codeToCidRanges);

@@ -30,8 +30,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
 import org.apache.pdfbox.cos.COSArray;
 import org.apache.pdfbox.cos.COSBase;
 import org.apache.pdfbox.cos.COSDictionary;
@@ -63,7 +63,7 @@ import org.apache.pdfbox.util.Matrix;
  */
 public final class PDAcroForm implements COSObjectable
 {
-    private static final Log LOG = LogFactory.getLog(PDAcroForm.class);
+    private static final Logger LOG = LogManager.getLogger(PDAcroForm.class);
 
     private static final int FLAG_SIGNATURES_EXIST = 1;
     private static final int FLAG_APPEND_ONLY = 1 << 1;
@@ -75,7 +75,7 @@ public final class PDAcroForm implements COSObjectable
 
     private ScriptingHandler scriptingHandler;
 
-    private final Map<COSName, SoftReference<PDFont>> directFontCache = new HashMap<COSName, SoftReference<PDFont>>();
+    private final Map<COSName, SoftReference<PDFont>> directFontCache = new HashMap<>();
 
     /**
      * Constructor.
@@ -683,6 +683,52 @@ public final class PDAcroForm implements COSObjectable
         dictionary.setFlag(COSName.SIG_FLAGS, FLAG_APPEND_ONLY, appendOnly);
     }
 
+    /**
+     * Return the calculation order in which field values should be recalculated when the value of
+     * any field changes. (Read about "Trigger Events" in the PDF specification)
+     *
+     * @return field list. Note these objects may not be identical to PDField objects retrieved from
+     * other methods (depending on cache setting). The best strategy is to call
+     * {@link #getCOSObject()} to check for identity. The list is not backed by the /CO COSArray in
+     * the document.
+     */
+    public List<PDField> getCalcOrder()
+    {
+        COSArray co = dictionary.getCOSArray(COSName.CO);
+        if (co == null)
+        {
+            return Collections.emptyList();
+        }
+
+        Iterable<PDField> fields = isCachingFields() ? fieldCache.values() : getFieldTree();
+
+        List<PDField> actuals = new ArrayList<>();
+        for (int i = 0; i < co.size(); i++)
+        {
+            COSBase item = co.getObject(i);
+            for (PDField field : fields)
+            {
+                if (field.getCOSObject() == item)
+                {
+                    actuals.add(field);
+                    break;
+                }
+            }
+        }
+        return actuals;
+    }
+
+    /**
+     * Set the calculation order in which field values should be recalculated when the value of any
+     * field changes. (Read about "Trigger Events" in the PDF specification)
+     *
+     * @param fields The field list.
+     */
+    public void setCalcOrder(List<PDField> fields)
+    {
+        dictionary.setItem(COSName.CO, new COSArray(fields));
+    }
+
     private Matrix resolveTransformationMatrix(PDAnnotation annotation, PDAppearanceStream appearanceStream)
     {
         // 1st step transform appearance stream bbox with appearance stream matrix
@@ -713,6 +759,13 @@ public final class PDAcroForm implements COSObjectable
         return transformedAppearanceBox.getBounds2D();
     }
 
+    /**
+     * Build a map of pages => widgets
+     * @param fields a list of fields to be flattened
+     * @param pages the page tree
+     * @return
+     * @throws IOException 
+     */
     private Map<COSDictionary,Set<COSDictionary>> buildPagesWidgetsMap(
             List<PDField> fields, PDPageTree pages) throws IOException
     {
@@ -731,6 +784,7 @@ public final class PDAcroForm implements COSObjectable
                 }
                 else
                 {
+                    LOG.warn("missing /P entry (page reference) in a widget for field: {}", field);
                     hasMissingPageRef = true;
                 }
             }
@@ -744,11 +798,12 @@ public final class PDAcroForm implements COSObjectable
         // If there is a widget with a missing page reference we need to build the map reverse i.e. 
         // from the annotations to the widget.
         LOG.warn("There has been a widget with a missing page reference, will check all page annotations");
+        Set<COSDictionary> widgetDictionarySet = createWidgetDictionarySet(fields);
         for (PDPage page : pages)
         {
             for (PDAnnotation annotation : page.getAnnotations())
             {
-                if (annotation instanceof PDAnnotationWidget)
+                if (widgetDictionarySet.contains(annotation.getCOSObject()))
                 {
                     fillPagesAnnotationMap(pagesAnnotationsMap, page, (PDAnnotationWidget) annotation);
                 }
@@ -756,6 +811,26 @@ public final class PDAcroForm implements COSObjectable
         }
 
         return pagesAnnotationsMap;
+    }
+
+    /**
+     * Return a set of all annotation widget dictionaries related to the fields to be flattened.
+     *
+     * @param fields
+     * @return
+     */
+    private Set<COSDictionary> createWidgetDictionarySet(List<PDField> fields)
+    {
+        Set<COSDictionary> widgetDictionarySet = new HashSet<>();
+        for (PDField field : fields)
+        {
+            List<PDAnnotationWidget> widgets = field.getWidgets();
+            for (PDAnnotationWidget widget : widgets)
+            {
+                widgetDictionarySet.add(widget.getCOSObject());
+            }
+        }
+        return widgetDictionarySet;
     }
 
     private void fillPagesAnnotationMap(Map<COSDictionary, Set<COSDictionary>> pagesAnnotationsMap,

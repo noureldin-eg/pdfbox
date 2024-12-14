@@ -40,13 +40,17 @@ import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.io.PrintStream;
 import java.io.Writer;
+
 import java.net.URISyntaxException;
+
+import java.nio.file.Files;
+
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
 import org.apache.fontbox.util.BoundingBox;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
@@ -56,6 +60,7 @@ import org.apache.pdfbox.pdmodel.font.PDType3Font;
 import org.apache.pdfbox.pdmodel.interactive.documentnavigation.destination.PDPageDestination;
 import org.apache.pdfbox.pdmodel.interactive.documentnavigation.outline.PDDocumentOutline;
 import org.apache.pdfbox.pdmodel.interactive.documentnavigation.outline.PDOutlineItem;
+
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
@@ -111,7 +116,7 @@ class TestTextStripper
     /**
      * Logger instance.
      */
-    private static final Log log = LogFactory.getLog(TestTextStripper.class);
+    private static final Logger LOG = LogManager.getLogger(TestTextStripper.class);
 
     private boolean bFail = false;
     private static PDFTextStripper stripper;
@@ -161,9 +166,9 @@ class TestTextStripper
                 if( expectedArray[expectedIndex] != actualArray[actualIndex] )
                 {
                     equals = false;
-                    log.warn("Lines differ at index"
-                     + " expected:" + expectedIndex + "-" + (int)expectedArray[expectedIndex]
-                     + " actual:" + actualIndex + "-" + (int)actualArray[actualIndex] );
+                    LOG.warn("Lines differ at index expected: {}-{ } actual: {}-{}", expectedIndex,
+                            (int) expectedArray[expectedIndex], actualIndex,
+                            (int) actualArray[actualIndex]);
                     break;
                 }
                 expectedIndex = skipWhitespace( expectedArray, expectedIndex );
@@ -176,17 +181,18 @@ class TestTextStripper
                 if( expectedIndex != expectedArray.length )
                 {
                     equals = false;
-                    log.warn("Expected line is longer at:" + expectedIndex );
+                    LOG.warn("Expected line is longer at: {}", expectedIndex);
                 }
                 if( actualIndex != actualArray.length )
                 {
                     equals = false;
-                    log.warn("Actual line is longer at:" + actualIndex );
+                    LOG.warn("Actual line is longer at: {}", actualIndex);
                 }
                 if (expectedArray.length != actualArray.length)
                 {
                     equals = false;
-                    log.warn("Expected lines: " + expectedArray.length + ", actual lines: " + actualArray.length);
+                    LOG.warn("Expected lines: {}, actual lines: {}", expectedArray.length,
+                            actualArray.length);
                 }
             }
         }
@@ -231,20 +237,14 @@ class TestTextStripper
     {
         if(bSort)
         {
-            log.info("Preparing to parse " + inFile.getName() + " for sorted test");
+            LOG.info("Preparing to parse {} for sorted test", inFile.getName());
         }
         else
         {
-            log.info("Preparing to parse " + inFile.getName() + " for standard test");
+            LOG.info("Preparing to parse {} for standard test", inFile.getName());
         }
 
-        if (!outDir.exists()) 
-        {
-            if (!outDir.mkdirs()) 
-            {
-                throw (new Exception("Error creating " + outDir.getAbsolutePath() + " directory"));
-            }
-        }
+        Files.createDirectories(outDir.toPath());
 
         try (PDDocument document = Loader.loadPDF(inFile))
         {
@@ -285,18 +285,17 @@ class TestTextStripper
 
             if (bLogResult)
             {
-                log.info("Text for " + inFile.getName() + ":");
-                log.info(stripper.getText(document));
+                LOG.info("Text for {}:", inFile.getName());
+                LOG.info(stripper.getText(document));
             }
 
             if (!expectedFile.exists())
             {
                 this.bFail = true;
-                log.error("FAILURE: Input verification file: " + expectedFile.getAbsolutePath() +
-                        " did not exist");
+                LOG.error("FAILURE: Input verification file: {} does not exist",
+                        expectedFile.getAbsolutePath());
                 return;
             }
-            
             compareResult(expectedFile, outFile, inFile, bSort, diffFile);
         }
     }
@@ -327,13 +326,10 @@ class TestTextStripper
                 {
                     this.bFail = true;
                     localFail = true;
-                    log.error("FAILURE: Line mismatch for file " + inFile.getName() +
-                            " (sort = "+bSort+")" +
-                                    " at expected line: " + expectedReader.getLineNumber() +
-                            " at actual line: " + actualReader.getLineNumber() +
-                            "\nexpected line was: \"" + expectedLine + "\"" +
-                                    "\nactual line was:   \"" + actualLine + "\"" + "\n");
-                    
+                    LOG.error(
+                            "FAILURE: Line mismatch for file {} (sort = {}) at expected line: {} at actual line: {}\nexpected line was: \"{}\"\nactual line was: \"{}\"\n",
+                            expectedFile.getAbsolutePath(), bSort, expectedReader.getLineNumber(),
+                            actualReader.getLineNumber(), expectedLine, actualLine);
                     //lets report all lines, even though this might produce some verbose logging
                     //break;
                 }
@@ -672,4 +668,24 @@ class TestTextStripper
         }
     }
 
+    /**
+     * Check that setting start and end pages work properly.
+     *
+     * @throws IOException 
+     */
+    @Test
+    void testStartEndPage() throws IOException
+    {
+        File pdfFile = new File("src/test/resources/input", "eu-001.pdf");
+        try (PDDocument doc = Loader.loadPDF(pdfFile))
+        {
+            PDFTextStripper textStripper = new PDFTextStripper();
+            textStripper.setStartPage(2);
+            textStripper.setEndPage(2);
+            String text = textStripper.getText(doc).trim();
+            assertTrue(text.startsWith("Pesticides"));
+            assertTrue(text.endsWith("1 000 10 10"));
+            assertEquals(1378, text.replaceAll("\r", "").length());
+        }
+    }
 }

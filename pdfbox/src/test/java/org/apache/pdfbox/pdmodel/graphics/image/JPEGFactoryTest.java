@@ -32,7 +32,6 @@ import javax.imageio.ImageIO;
 
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.cos.COSName;
-import org.apache.pdfbox.io.IOUtils;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.graphics.color.PDDeviceCMYK;
 import org.apache.pdfbox.pdmodel.graphics.color.PDDeviceGray;
@@ -163,16 +162,6 @@ class JPEGFactoryTest
     @Test
     void testCreateFromImageINT_ARGB() throws IOException
     {
-        // workaround Open JDK bug
-        // http://bugs.java.com/bugdatabase/view_bug.do?bug_id=7044758
-        if (System.getProperty("java.runtime.name").equals("OpenJDK Runtime Environment")
-                && (System.getProperty("java.specification.version").equals("1.6")
-                || System.getProperty("java.specification.version").equals("1.7")
-                || System.getProperty("java.specification.version").equals("1.8")))
-        {
-            return;
-        }
-
         PDDocument document = new PDDocument();
         BufferedImage image = ImageIO.read(JPEGFactoryTest.class.getResourceAsStream("jpeg.jpg"));
 
@@ -208,16 +197,6 @@ class JPEGFactoryTest
     @Test
     void testCreateFromImage4BYTE_ABGR() throws IOException
     {
-        // workaround Open JDK bug
-        // http://bugs.java.com/bugdatabase/view_bug.do?bug_id=7044758
-        if (System.getProperty("java.runtime.name").equals("OpenJDK Runtime Environment")
-                && (System.getProperty("java.specification.version").equals("1.6")
-                || System.getProperty("java.specification.version").equals("1.7")
-                || System.getProperty("java.specification.version").equals("1.8")))
-        {
-            return;
-        }
-
         PDDocument document = new PDDocument();
         BufferedImage image = ImageIO.read(JPEGFactoryTest.class.getResourceAsStream("jpeg.jpg"));
 
@@ -254,16 +233,6 @@ class JPEGFactoryTest
     @Test
     void testCreateFromImageUSHORT_555_RGB() throws IOException
     {
-        // workaround Open JDK bug
-        // http://bugs.java.com/bugdatabase/view_bug.do?bug_id=7044758
-        if (System.getProperty("java.runtime.name").equals("OpenJDK Runtime Environment")
-                && (System.getProperty("java.specification.version").equals("1.6")
-                || System.getProperty("java.specification.version").equals("1.7")
-                || System.getProperty("java.specification.version").equals("1.8")))
-        {
-            return;
-        }
-
         PDDocument document = new PDDocument();
         BufferedImage image = ImageIO.read(JPEGFactoryTest.class.getResourceAsStream("jpeg.jpg"));
 
@@ -324,8 +293,8 @@ class JPEGFactoryTest
             ByteArrayOutputStream baos2 = new ByteArrayOutputStream();
             try (InputStream dctStream = img.createInputStream(Arrays.asList(COSName.DCT_DECODE.getName())))
             {
-                IOUtils.copy(resourceStream, baos1);
-                IOUtils.copy(dctStream, baos2);
+                resourceStream.transferTo(baos1);
+                dctStream.transferTo(baos2);
             }
             resourceStream.close();
             assertArrayEquals(baos1.toByteArray(), baos2.toByteArray());

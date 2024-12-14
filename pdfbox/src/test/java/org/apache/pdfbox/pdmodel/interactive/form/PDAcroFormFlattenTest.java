@@ -25,10 +25,12 @@ import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
-import java.net.URL;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 import java.util.stream.Stream;
 
@@ -36,7 +38,6 @@ import javax.imageio.ImageIO;
 
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.Loader;
-import org.apache.pdfbox.pdfwriter.compress.CompressParameters;
 import org.apache.pdfbox.rendering.PDFRenderer;
 import org.apache.pdfbox.rendering.TestPDFToImage;
 import org.junit.jupiter.api.BeforeAll;
@@ -129,9 +130,6 @@ class PDAcroFormFlattenTest
         // annotations.
         "https://issues.apache.org/jira/secure/attachment/12994791/flatten.pdf,PDFBOX-4788.pdf",
     
-        // PDFBOX-4889: appearance streams with empty /BBox.
-        "https://issues.apache.org/jira/secure/attachment/13005793/f1040sb%20test.pdf,PDFBOX-4889.pdf",
-
         // PDFBOX-4955: appearance streams with forms that are not used.
         "https://issues.apache.org/jira/secure/attachment/13011410/PDFBOX-4955.pdf,PDFBOX-4955.pdf",
 
@@ -139,7 +137,8 @@ class PDAcroFormFlattenTest
         // disabled as there is a minimal difference which can not be seen visually on ci-builds
         // "https://issues.apache.org/jira/secure/attachment/13012242/PDFBOX-4958.pdf,PDFBOX-4958-flattened.pdf"
     })
-    void testFlatten(String sourceUrl, String targetFileName) throws IOException {
+    void testFlatten(String sourceUrl, String targetFileName) throws IOException, URISyntaxException
+    {
         flattenAndCompare(sourceUrl, targetFileName);
     }
 
@@ -168,7 +167,7 @@ class PDAcroFormFlattenTest
     }
 
     @Test
-    void flattenTestPDFBOX5254() throws IOException
+    void flattenTestPDFBOX5254() throws IOException, URISyntaxException
     {
         String sourceUrl = "https://issues.apache.org/jira/secure/attachment/13005793/f1040sb%20test.pdf";
         String targetFileName = "PDFBOX-4889-5254.pdf";
@@ -181,8 +180,9 @@ class PDAcroFormFlattenTest
         {
             testPdf.getDocumentCatalog().getAcroForm().flatten();
             testPdf.setAllSecurityToBeRemoved(true);
-            assertTrue(testPdf.getDocumentCatalog().getAcroForm().getFields().isEmpty());
-            testPdf.save(outputFile, CompressParameters.NO_COMPRESSION);
+            testPdf.save(outputFile);
+            assertTrue(testPdf.getDocumentCatalog().getAcroForm(null).getFields().isEmpty());
+            assertEquals(72, testPdf.getPage(0).getAnnotations().size());
         }
 
         // compare rendering
@@ -202,12 +202,69 @@ class PDAcroFormFlattenTest
         }
     }
 
+    /**
+     * Check that only VN_Name is removed in the field tree and in the annotations list. That field
+     * has an "orphan" widget that belongs to no page.
+     *
+     * @throws IOException
+     * @throws URISyntaxException
+     */
+    @Test
+    void flattenTestPDFBOX5225() throws IOException, URISyntaxException
+    {
+        String sourceUrl = "https://issues.apache.org/jira/secure/attachment/13027311/SourceFailure.pdf";
+        String targetFileName = "PDFBOX-5225.pdf";
+
+        generateSamples(sourceUrl, targetFileName);
+
+        File inputFile = new File(IN_DIR, targetFileName);
+        File outputFile = new File(OUT_DIR, targetFileName);
+
+        try (PDDocument testPdf = Loader.loadPDF(inputFile))
+        {
+            PDAcroForm acroForm = testPdf.getDocumentCatalog().getAcroForm();
+            List<PDField> list = new ArrayList<>();
+            list.add(acroForm.getField("VN_NAME"));
+            acroForm.flatten(list, false);
+            testPdf.setAllSecurityToBeRemoved(true);
+            testPdf.save(outputFile);
+            int count = 0;
+            Iterator<PDField> iterator = acroForm.getFieldTree().iterator();
+            while (iterator.hasNext())
+            {
+                iterator.next();
+                ++count;
+            }
+            assertEquals(76, count);
+            assertEquals(59, testPdf.getPage(0).getAnnotations().size());
+        }
+
+        // compare rendering
+        if (!TestPDFToImage.doTestFile(outputFile, IN_DIR.getAbsolutePath(),
+                OUT_DIR.getAbsolutePath()))
+        {
+            // check manually
+            System.err.println("Rendering of " + outputFile
+                    + " failed or is not identical to expected rendering in " + IN_DIR
+                    + " directory");
+        }
+        else
+        {
+            // cleanup input and output directory for matching files.
+            removeAllRenditions(inputFile);
+            inputFile.delete();
+            outputFile.delete();
+        }
+    }
+
     /*
      * Flatten and compare with generated image samples.
      *
      * @throws IOException
+     * @throws URISyntaxException
      */
-    private static void flattenAndCompare(String sourceUrl, String targetFileName) throws IOException
+    private static void flattenAndCompare(String sourceUrl, String targetFileName)
+            throws IOException, URISyntaxException
     {
         generateSamples(sourceUrl,targetFileName);
 
@@ -241,8 +298,10 @@ class PDAcroFormFlattenTest
      * Generate the sample images to which the PDF will be compared after flatten.
      *
      * @throws IOException
+     * @throws URISyntaxException
      */
-    private static void generateSamples(String sourceUrl, String targetFile) throws IOException
+    private static void generateSamples(String sourceUrl, String targetFile)
+            throws IOException, URISyntaxException
     {
         getFromUrl(sourceUrl, targetFile);
 
@@ -267,10 +326,12 @@ class PDAcroFormFlattenTest
      * Get a PDF from URL and copy to file for processing.
      *
      * @throws IOException
+     * @throws URISyntaxException
      */
-    private static void getFromUrl(String sourceUrl, String targetFile) throws IOException
+    private static void getFromUrl(String sourceUrl, String targetFile)
+            throws IOException, URISyntaxException
     {
-        try (InputStream is = new URL(sourceUrl).openStream())
+        try (InputStream is = new URI(sourceUrl).toURL().openStream())
         {
             Files.copy(is, new File(IN_DIR, targetFile).toPath(), StandardCopyOption.REPLACE_EXISTING);
         }

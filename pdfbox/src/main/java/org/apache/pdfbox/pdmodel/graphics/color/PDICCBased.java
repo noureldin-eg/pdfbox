@@ -31,8 +31,8 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.List;
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
 import org.apache.pdfbox.cos.COSArray;
 import org.apache.pdfbox.cos.COSBase;
 import org.apache.pdfbox.cos.COSFloat;
@@ -41,6 +41,7 @@ import org.apache.pdfbox.cos.COSStream;
 import org.apache.pdfbox.cos.COSObject;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDResources;
+import org.apache.pdfbox.pdmodel.ResourceCache;
 import org.apache.pdfbox.pdmodel.common.PDRange;
 import org.apache.pdfbox.pdmodel.common.PDStream;
 
@@ -53,7 +54,7 @@ import org.apache.pdfbox.pdmodel.common.PDStream;
  */
 public final class PDICCBased extends PDCIEBasedColorSpace
 {
-    private static final Log LOG = LogFactory.getLog(PDICCBased.class);
+    private static final Logger LOG = LogManager.getLogger(PDICCBased.class);
 
     private final PDStream stream;
     private int numberOfComponents = -1;
@@ -66,27 +67,6 @@ public final class PDICCBased extends PDCIEBasedColorSpace
     // reasons with LittleCMS (LCMS), see PDFBOX-4309
     // WARNING: do not activate this in a conforming reader
     private boolean useOnlyAlternateColorSpace = false;
-    private static final boolean IS_KCMS;
-
-    static
-    {
-        String cmmProperty = System.getProperty("sun.java2d.cmm");
-        boolean result = false;
-        if ("sun.java2d.cmm.kcms.KcmsServiceProvider".equals(cmmProperty))
-        {
-            try
-            {
-                Class.forName("sun.java2d.cmm.kcms.KcmsServiceProvider");
-                result = true;
-            }
-            catch (ClassNotFoundException e)
-            {
-                // KCMS not available
-            }
-        }
-        // else maybe KCMS was available, but not wished
-        IS_KCMS = result;
-    }
 
     /**
      * Creates a new ICC color space with an empty stream.
@@ -129,25 +109,26 @@ public final class PDICCBased extends PDCIEBasedColorSpace
     {
         checkArray(iccArray);
         COSBase base = iccArray.get(1);
-        COSObject indirect = null;
-        if (base instanceof COSObject)
+        if (base instanceof COSObject && resources != null)
         {
-            indirect = (COSObject) base;
-        }
-        if (indirect != null && resources != null && resources.getResourceCache() != null)
-        {
-            PDColorSpace space = resources.getResourceCache().getColorSpace(indirect);
-            if (space instanceof PDICCBased)
+            ResourceCache resourceCache = resources.getResourceCache();
+            if (resourceCache != null)
             {
-                return (PDICCBased) space;
+                COSObject indirect = (COSObject) base;
+                PDColorSpace space = resourceCache.getColorSpace(indirect);
+                if (space instanceof PDICCBased)
+                {
+                    return (PDICCBased) space;
+                }
+                else
+                {
+                    PDICCBased newSpace = new PDICCBased(iccArray);
+                    resourceCache.put(indirect, newSpace);
+                    return newSpace;
+                }
             }
         }
-        PDICCBased space = new PDICCBased(iccArray);
-        if (indirect != null && resources != null && resources.getResourceCache() != null)
-        {
-            resources.getResourceCache().put(indirect, space);
-        }
-        return space;
+        return new PDICCBased(iccArray);
     }
 
     private static void checkArray(COSArray iccArray) throws IOException
@@ -191,7 +172,7 @@ public final class PDICCBased extends PDCIEBasedColorSpace
             }
             catch (IOException e)
             {
-              LOG.warn("Error initializing alternate color space: " + e.getLocalizedMessage());
+                LOG.warn("Error initializing alternate color space: {}", e.getLocalizedMessage());
             }
         }
         try (InputStream input = this.stream.createInputStream())
@@ -216,7 +197,8 @@ public final class PDICCBased extends PDCIEBasedColorSpace
                 }
 
                 // set initial colour
-                float[] initial = new float[getNumberOfComponents()];
+                int numOfComponents = getNumberOfComponents();
+                float[] initial = new float[numOfComponents];
                 for (int c = 0; c < initial.length; c++)
                 {
                     initial[c] = Math.max(0, getRangeForComponent(c).getMin());
@@ -226,17 +208,12 @@ public final class PDICCBased extends PDCIEBasedColorSpace
                 // do things that trigger a ProfileDataException
                 // or CMMException due to invalid profiles, see PDFBOX-1295 and PDFBOX-1740 (ü-file)
                 // or ArrayIndexOutOfBoundsException, see PDFBOX-3610
-                // also triggers a ProfileDataException for PDFBOX-3549 with KCMS
-                /// also triggers a ProfileDataException for PDFBOX-3549 with KCMS
                 // also triggers "CMMException: LCMS error 13" for PDFBOX-5563 with LCMS, but
                 // calling "new ComponentColorModel" doesn't
-                awtColorSpace.toRGB(new float[getNumberOfComponents()]);
-                if (!IS_KCMS)
-                {
-                    // PDFBOX-4015: this one triggers "CMMException: LCMS error 13" with LCMS
-                    new ComponentColorModel(awtColorSpace, false, false,
-                            Transparency.OPAQUE, DataBuffer.TYPE_BYTE);
-                }
+                awtColorSpace.toRGB(new float[numOfComponents]);
+                // PDFBOX-4015: this one triggers "CMMException: LCMS error 13" with LCMS
+                new ComponentColorModel(awtColorSpace, false, false, Transparency.OPAQUE,
+                        DataBuffer.TYPE_BYTE);
             }
         }
         catch (ProfileDataException | CMMException | IllegalArgumentException |
@@ -256,8 +233,8 @@ public final class PDICCBased extends PDCIEBasedColorSpace
         }
         if (e != null)
         {
-            LOG.warn("Can't read embedded ICC profile (" + e.getLocalizedMessage() +
-                     "), using alternate color space: " + alternateColorSpace.getName());
+            LOG.warn("Can't read embedded ICC profile ({}), using alternate color space: {}",
+                    e.getLocalizedMessage(), alternateColorSpace.getName());
         }
         initialColor = alternateColorSpace.getInitialColor();
     }
@@ -285,7 +262,7 @@ public final class PDICCBased extends PDCIEBasedColorSpace
             if (profileData[ICC_Profile.icHdrRenderingIntent] == ICC_Profile.icPerceptual)
             {
                 LOG.warn("ICC profile is Perceptual, ignoring, treating as Display class");
-            	intToBigEndian(ICC_Profile.icSigDisplayClass, profileData, ICC_Profile.icHdrDeviceClass);
+                intToBigEndian(ICC_Profile.icSigDisplayClass, profileData, ICC_Profile.icHdrDeviceClass);
                 return ICC_Profile.getInstance(profileData);
             }
         }
@@ -367,8 +344,9 @@ public final class PDICCBased extends PDCIEBasedColorSpace
                 int numIccComponents = iccProfile.getNumComponents();
                 if (numIccComponents != numberOfComponents)
                 {
-                    LOG.warn("Using " + numIccComponents + " components from ICC profile info instead of " +
-                            numberOfComponents + " components from /N entry");
+                    LOG.warn(
+                            "Using {} components from ICC profile info instead of {} components from /N entry",
+                            numIccComponents, numberOfComponents);
                     numberOfComponents = numIccComponents;
                 }
             }
@@ -541,8 +519,8 @@ public final class PDICCBased extends PDCIEBasedColorSpace
         // extend range array with default values if needed
         while (rangeArray.size() < (n + 1) * 2)
         {
-            rangeArray.add(new COSFloat(0));
-            rangeArray.add(new COSFloat(1));
+            rangeArray.add(COSFloat.ZERO);
+            rangeArray.add(COSFloat.ONE);
         }
         rangeArray.set(n*2, new COSFloat(range.getMin()));
         rangeArray.set(n*2+1, new COSFloat(range.getMax()));

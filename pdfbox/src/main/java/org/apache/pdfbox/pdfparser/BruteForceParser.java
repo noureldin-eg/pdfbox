@@ -24,8 +24,8 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.stream.Collectors;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
 import org.apache.pdfbox.cos.COSArray;
 import org.apache.pdfbox.cos.COSBase;
 import org.apache.pdfbox.cos.COSDictionary;
@@ -42,33 +42,33 @@ import org.apache.pdfbox.pdmodel.encryption.SecurityHandler;
 /**
  * Brute force parser to be used as last resort if a malformed pdf can't be read.
  */
-public class BruteForceParser extends COSParser
+public class BruteForceParser
 {
-    private static final char[] XREF_TABLE = new char[] { 'x', 'r', 'e', 'f' };
-    private static final char[] XREF_STREAM = new char[] { '/', 'X', 'R', 'e', 'f' };
+    private static final char[] XREF_TABLE = { 'x', 'r', 'e', 'f' };
+    private static final char[] XREF_STREAM = { '/', 'X', 'R', 'e', 'f' };
 
     private static final long MINIMUM_SEARCH_OFFSET = 6;
 
     /**
      * EOF-marker.
      */
-    private static final char[] EOF_MARKER = new char[] { '%', '%', 'E', 'O', 'F' };
+    private static final char[] EOF_MARKER = { '%', '%', 'E', 'O', 'F' };
     /**
      * obj-marker.
      */
-    private static final char[] OBJ_MARKER = new char[] { 'o', 'b', 'j' };
+    private static final char[] OBJ_MARKER = { 'o', 'b', 'j' };
 
     /**
      * trailer-marker.
      */
-    private static final char[] TRAILER_MARKER = new char[] { 't', 'r', 'a', 'i', 'l', 'e', 'r' };
+    private static final char[] TRAILER_MARKER = { 't', 'r', 'a', 'i', 'l', 'e', 'r' };
 
     /**
      * ObjStream-marker.
      */
-    private static final char[] OBJ_STREAM = new char[] { '/', 'O', 'b', 'j', 'S', 't', 'm' };
+    private static final char[] OBJ_STREAM = { '/', 'O', 'b', 'j', 'S', 't', 'm' };
 
-    private static final Log LOG = LogFactory.getLog(BruteForceParser.class);
+    private static final Logger LOG = LogManager.getLogger(BruteForceParser.class);
 
     /**
      * Contains all found objects of a brute force search.
@@ -77,18 +77,23 @@ public class BruteForceParser extends COSParser
 
     private boolean bfSearchTriggered = false;
 
+    private final COSParser parser;
+    private final COSDocument document;
+    private final RandomAccessRead source;
+
     /**
      * Constructor. Triggers a brute force search for all objects of the document.
      *
-     * @param source input representing the pdf.
-     * @param document the corresponding COS document
+     * @param cosDocument the corresponding COS document
+     * @param cosParser the COSParser to be used for reading the pdf
      * 
      * @throws IOException if the source data could not be read
      */
-    public BruteForceParser(RandomAccessRead source, COSDocument document) throws IOException
+    public BruteForceParser(COSDocument cosDocument, COSParser cosParser) throws IOException
     {
-        super(source);
-        this.document = document;
+        document = cosDocument;
+        parser = cosParser;
+        source = parser.source;
     }
 
     /**
@@ -140,25 +145,25 @@ public class BruteForceParser extends COSParser
             source.seek(currentOffset);
             int nextChar = source.read();
             currentOffset++;
-            if (isWhitespace(nextChar) && isString(OBJ_MARKER))
+            if (BaseParser.isWhitespace(nextChar) && parser.isString(OBJ_MARKER))
             {
                 long tempOffset = currentOffset - 2;
                 source.seek(tempOffset);
                 int genID = source.peek();
                 // is the next char a digit?
-                if (isDigit(genID))
+                if (BaseParser.isDigit(genID))
                 {
                     genID -= 48;
                     tempOffset--;
                     source.seek(tempOffset);
-                    if (isWhitespace())
+                    if (parser.isWhitespace())
                     {
-                        while (tempOffset > MINIMUM_SEARCH_OFFSET && isWhitespace())
+                        while (tempOffset > MINIMUM_SEARCH_OFFSET && parser.isWhitespace())
                         {
                             source.seek(--tempOffset);
                         }
                         boolean objectIDFound = false;
-                        while (tempOffset > MINIMUM_SEARCH_OFFSET && isDigit())
+                        while (tempOffset > MINIMUM_SEARCH_OFFSET && parser.isDigit())
                         {
                             source.seek(--tempOffset);
                             objectIDFound = true;
@@ -166,7 +171,7 @@ public class BruteForceParser extends COSParser
                         if (objectIDFound)
                         {
                             source.read();
-                            long objectId = readObjectNumber();
+                            long objectId = parser.readObjectNumber();
                             if (lastObjOffset > 0)
                             {
                                 // add the former object ID only if there was a subsequent object ID
@@ -185,21 +190,21 @@ public class BruteForceParser extends COSParser
             // check for "endo" as abbreviation for "endobj", as the pdf may be cut off
             // in the middle of the keyword, see PDFBOX-3936.
             // We could possibly implement a more intelligent algorithm if necessary
-            else if (nextChar == 'e' && isString(endobjString))
+            else if (nextChar == 'e' && parser.isString(endobjString))
             {
                 currentOffset += endobjString.length;
                 source.seek(currentOffset);
-                if (source.isEOF())
+                if (parser.isEOF())
                 {
                     endOfObjFound = true;
                 }
-                else if (isString(endobjRemainingString))
+                else if (parser.isString(endobjRemainingString))
                 {
                     currentOffset += endobjRemainingString.length;
                     endOfObjFound = true;
                 }
             }
-        } while (currentOffset < lastEOFMarker && !source.isEOF());
+        } while (currentOffset < lastEOFMarker && !parser.isEOF());
         if ((lastEOFMarker < Long.MAX_VALUE || endOfObjFound) && lastObjOffset > 0)
         {
             // if the pdf wasn't cut off in the middle or if the last object ends with a "endobj" marker
@@ -291,15 +296,12 @@ public class BruteForceParser extends COSParser
     /**
      * Brute force search for all objects streams of a pdf.
      * 
-     * @param trailerResolver the trailer resolver of the document
-     * @param securityHandler security handler to be used to decrypt encrypted documents
+     * @param xrefTable the cross reference table of the document
+     * 
      * @throws IOException if something went wrong
      */
-    protected void bfSearchForObjStreams(XrefTrailerResolver trailerResolver,
-            SecurityHandler<? extends ProtectionPolicy> securityHandler) throws IOException
+    protected void bfSearchForObjStreams(Map<COSObjectKey, Long> xrefTable) throws IOException
     {
-        // update security handler
-        this.securityHandler = securityHandler;
         // save origin offset
         long originOffset = source.getPosition();
 
@@ -308,8 +310,8 @@ public class BruteForceParser extends COSParser
         // log warning about skipped stream
         bfSearchForObjStreamOffsets.entrySet().stream() //
                 .filter(o -> bfCOSObjectOffsets.get(o.getValue()) == null) //
-                .forEach(o -> LOG.warn(
-                        "Skipped incomplete object stream:" + o.getValue() + " at " + o.getKey()));
+                .forEach(o -> LOG.warn("Skipped incomplete object stream:{} at {}", o.getValue(),
+                        o.getKey()));
 
         // collect all stream offsets
         List<Long> objStreamOffsets = bfSearchForObjStreamOffsets.entrySet().stream() //
@@ -318,24 +320,24 @@ public class BruteForceParser extends COSParser
                 .map(Map.Entry::getKey) //
                 .collect(Collectors.toList());
         // add all found compressed objects to the brute force search result
+        SecurityHandler<? extends ProtectionPolicy> securityHandler = parser.getSecurityHandler();
         for (Long offset : objStreamOffsets)
         {
             source.seek(offset);
-            long stmObjNumber = readObjectNumber();
-            int stmGenNumber = readGenerationNumber();
-            readExpectedString(OBJ_MARKER, true);
+            long stmObjNumber = parser.readObjectNumber();
+            int stmGenNumber = parser.readGenerationNumber();
+            parser.readExpectedString(OBJ_MARKER, true);
             COSStream stream = null;
             try
             {
-                COSDictionary dict = parseCOSDictionary(false);
-                stream = parseCOSStream(dict);
+                COSDictionary dict = parser.parseCOSDictionary(false);
+                stream = parser.parseCOSStream(dict);
                 if (securityHandler != null)
                 {
                     securityHandler.decryptStream(stream, stmObjNumber, stmGenNumber);
                 }
                 PDFObjectStreamParser objStreamParser = new PDFObjectStreamParser(stream, document);
                 Map<Long, Integer> objectNumbers = objStreamParser.readObjectNumbers();
-                Map<COSObjectKey, Long> xrefOffset = trailerResolver.getXrefTable();
                 for (Long objNumber : objectNumbers.keySet())
                 {
                     COSObjectKey objKey = new COSObjectKey(objNumber, 0);
@@ -349,13 +351,13 @@ public class BruteForceParser extends COSParser
                     if (existingOffset == null || offset > existingOffset)
                     {
                         bfCOSObjectOffsets.put(objKey, -stmObjNumber);
-                        xrefOffset.put(objKey, -stmObjNumber);
+                        xrefTable.put(objKey, -stmObjNumber);
                     }
                 }
             }
             catch (IOException exception)
             {
-                LOG.debug("Skipped corrupt stream: (" + stmObjNumber + " 0 at offset " + offset,
+                LOG.debug("Skipped corrupt stream: ({} 0 at offset {}", stmObjNumber, offset,
                         exception);
             }
             finally
@@ -389,8 +391,8 @@ public class BruteForceParser extends COSParser
             {
                 boolean rootFound = false;
                 boolean infoFound = false;
-                skipSpaces();
-                COSDictionary trailerDict = parseCOSDictionary(true);
+                parser.skipSpaces();
+                COSDictionary trailerDict = parser.parseCOSDictionary(true);
                 COSObject rootObj = trailerDict.getCOSObject(COSName.ROOT);
                 if (rootObj != null)
                 {
@@ -532,11 +534,11 @@ public class BruteForceParser extends COSParser
                 // check if the following data is some valid pdf content
                 // which most likely indicates that the pdf is linearized,
                 // updated or just cut off somewhere in the middle
-                skipSpaces();
-                if (!isString(XREF_TABLE))
+                parser.skipSpaces();
+                if (!parser.isString(XREF_TABLE))
                 {
-                    readObjectNumber();
-                    readGenerationNumber();
+                    parser.readObjectNumber();
+                    parser.readGenerationNumber();
                 }
             }
             catch (IOException exception)
@@ -583,21 +585,20 @@ public class BruteForceParser extends COSParser
                     source.seek(currentOffset);
                     for (int j = 0; j < 10; j++)
                     {
-                        if (isString(string))
+                        if (parser.isString(string))
                         {
                             long tempOffset = currentOffset - 1;
                             source.seek(tempOffset);
-                            int genID = source.peek();
                             // is the next char a digit?
-                            if (isDigit(genID))
+                            if (parser.isDigit())
                             {
                                 tempOffset--;
                                 source.seek(tempOffset);
-                                if (isSpace())
+                                if (parser.isSpace())
                                 {
                                     int length = 0;
                                     source.seek(--tempOffset);
-                                    while (tempOffset > MINIMUM_SEARCH_OFFSET && isDigit())
+                                    while (tempOffset > MINIMUM_SEARCH_OFFSET && parser.isDigit())
                                     {
                                         source.seek(--tempOffset);
                                         length++;
@@ -606,15 +607,15 @@ public class BruteForceParser extends COSParser
                                     {
                                         source.read();
                                         newOffset = source.getPosition();
-                                        long objNumber = readObjectNumber();
-                                        int genNumber = readGenerationNumber();
+                                        long objNumber = parser.readObjectNumber();
+                                        int genNumber = parser.readGenerationNumber();
                                         COSObjectKey streamObjectKey = new COSObjectKey(objNumber,
                                                 genNumber);
                                         bfSearchObjStreamsOffsets.put(newOffset, streamObjectKey);
                                     }
                                 }
                             }
-                            LOG.debug("Dictionary start for object stream -> " + newOffset);
+                            LOG.debug("Dictionary start for object stream -> {}", newOffset);
                             objFound = true;
                             break;
                         }
@@ -648,7 +649,7 @@ public class BruteForceParser extends COSParser
         {
             source.seek(newOffset - 1);
             // ensure that we don't read "startxref" instead of "xref"
-            if (isWhitespace())
+            if (parser.isWhitespace())
             {
                 bfSearchXRefTablesOffsets.add(newOffset);
             }
@@ -685,21 +686,20 @@ public class BruteForceParser extends COSParser
                     source.seek(currentOffset);
                     for (int j = 0; j < 10; j++)
                     {
-                        if (isString(string))
+                        if (parser.isString(string))
                         {
                             long tempOffset = currentOffset - 1;
                             source.seek(tempOffset);
-                            int genID = source.peek();
                             // is the next char a digit?
-                            if (isDigit(genID))
+                            if (parser.isDigit())
                             {
                                 tempOffset--;
                                 source.seek(tempOffset);
-                                if (isSpace())
+                                if (parser.isSpace())
                                 {
                                     int length = 0;
                                     source.seek(--tempOffset);
-                                    while (tempOffset > MINIMUM_SEARCH_OFFSET && isDigit())
+                                    while (tempOffset > MINIMUM_SEARCH_OFFSET && parser.isDigit())
                                     {
                                         source.seek(--tempOffset);
                                         length++;
@@ -711,8 +711,8 @@ public class BruteForceParser extends COSParser
                                     }
                                 }
                             }
-                            LOG.debug("Fixed reference for xref stream " + xrefOffset + " -> "
-                                    + newOffset);
+                            LOG.debug("Fixed reference for xref stream {} -> {}", xrefOffset,
+                                    newOffset);
                             objFound = true;
                             break;
                         }
@@ -759,7 +759,7 @@ public class BruteForceParser extends COSParser
     /**
      * Tell if the dictionary is a PDF or FDF catalog.
      * 
-     * @param dictionary
+     * @param dictionary the dictionary to be tested
      * @return true if the given dictionary is a root dictionary
      */
     private boolean isCatalog(COSDictionary dictionary)
@@ -810,42 +810,50 @@ public class BruteForceParser extends COSParser
 
     /**
      * Rebuild the trailer dictionary if startxref can't be found.
+     *
+     * @param xrefTable the cross reference table of the pdf
      * 
-     * @param trailerResolver the trailer resolver of the document
-     * @param securityHandler security handler to be used to decrypt encrypted documents
      * @return the rebuild trailer dictionary
      * 
      * @throws IOException if something went wrong
      */
-    protected COSDictionary rebuildTrailer(XrefTrailerResolver trailerResolver,
-            SecurityHandler<? extends ProtectionPolicy> securityHandler) throws IOException
+    protected COSDictionary rebuildTrailer(Map<COSObjectKey, Long> xrefTable) throws IOException
     {
-        // update security handler
-        this.securityHandler = securityHandler;
-        // reset trailer resolver
-        trailerResolver.reset();
+        // use a new trailer resolver
+        XrefTrailerResolver trailerResolver = new XrefTrailerResolver();
         // use the found objects to rebuild the trailer resolver
         trailerResolver.nextXrefObj(0, XRefType.TABLE);
         getBFCOSObjectOffsets().forEach(trailerResolver::setXRef);
         trailerResolver.setStartxref(0);
+        // transfer xref-table to document
+        document.getXrefTable().clear();
+        document.addXRefTable(trailerResolver.getXrefTable());
+        // remember the highest XRef object number to avoid it being reused in incremental saving
+        Long maxValue = document.getXrefTable().keySet().stream() //
+                .map(COSObjectKey::getNumber) //
+                .reduce(Long::max) //
+                .orElse(0L);
+        document.setHighestXRefObjectNumber(maxValue);
+
         COSDictionary trailer = trailerResolver.getTrailer();
         document.setTrailer(trailer);
+        xrefTable.putAll(trailerResolver.getXrefTable());
         boolean searchForObjStreamsDone = false;
         if (!bfSearchForTrailer(trailer) && !searchForTrailerItems(trailer))
         {
             // root entry wasn't found, maybe it is part of an object stream
             // brute force search for all object streams.
-            bfSearchForObjStreams(trailerResolver, securityHandler);
+            bfSearchForObjStreams(xrefTable);
             searchForObjStreamsDone = true;
             // search again for the root entry
             searchForTrailerItems(trailer);
         }
         // prepare decryption if necessary
-        prepareDecryption();
+        parser.prepareDecryption();
         if (!searchForObjStreamsDone)
         {
             // brute force search for all object streams.
-            bfSearchForObjStreams(trailerResolver, securityHandler);
+            bfSearchForObjStreams(xrefTable);
         }
         return trailer;
     }

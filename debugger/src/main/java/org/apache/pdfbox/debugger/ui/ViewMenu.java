@@ -36,7 +36,6 @@ public class ViewMenu extends MenuBase
     private static final String EXTRACT_TEXT = "Extract Text";            
     private static final String REPAIR_ACROFORM = "Repair AcroForm";
 
-    private JMenuItem viewModeItem;
     private JCheckBoxMenuItem showTextStripper;
     private JCheckBoxMenuItem showTextStripperBeads;
     private JCheckBoxMenuItem showFontBBox;
@@ -174,33 +173,17 @@ public class ViewMenu extends MenuBase
         JMenu viewMenu = new JMenu("View");
         viewMenu.setMnemonic('V');
         
-        if (pdfDebugger.isPageMode())
+        TreeViewMenu treeViewMenu = TreeViewMenu.getInstance();
+        viewMenu.add(treeViewMenu.getMenu());
+        treeViewMenu.addMenuListeners(actionEvent ->
         {
-            viewModeItem = new JMenuItem("Show Internal Structure");
-        }
-        else
-        {
-            viewModeItem = new JMenuItem("Show Pages");
-        }
-        viewModeItem.addActionListener(actionEvent ->
-        {
-            if (pdfDebugger.isPageMode())
-            {
-                viewModeItem.setText("Show Pages");
-                pdfDebugger.setPageMode(false);
-            }
-            else
-            {
-                viewModeItem.setText("Show Internal Structure");
-                pdfDebugger.setPageMode(true);
-            }
+            pdfDebugger.setTreeViewMode(treeViewMenu.getTreeViewSelection());
             if (pdfDebugger.hasDocument())
             {
                 pdfDebugger.initTree();
             }
         });
-        viewMenu.add(viewModeItem);
-           
+
         ZoomMenu zoomMenu = ZoomMenu.getInstance();
         zoomMenu.setEnableMenu(false);
         viewMenu.add(zoomMenu.getMenu());
@@ -238,7 +221,6 @@ public class ViewMenu extends MenuBase
         viewMenu.addSeparator();
 
         allowSubsampling = new JCheckBoxMenuItem(ALLOW_SUBSAMPLING);
-        allowSubsampling.setEnabled(false);
         viewMenu.add(allowSubsampling);
 
         viewMenu.addSeparator();

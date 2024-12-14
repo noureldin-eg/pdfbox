@@ -17,17 +17,19 @@
 package org.apache.fontbox.ttf;
 
 import java.io.IOException;
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 /**
- * A table in a true type font.
- * 
+ * This 'post'-table is a required table in a TrueType font.
+ *
  * @author Ben Litchfield
  */
 public class PostScriptTable extends TTFTable
 {
-    private static final Log LOG = LogFactory.getLog(PostScriptTable.class);
+    private static final Logger LOG = LogManager.getLogger(PostScriptTable.class);
+
     private float formatType;
     private float italicAngle;
     private short underlinePosition;
@@ -46,12 +48,11 @@ public class PostScriptTable extends TTFTable
 
     PostScriptTable()
     {
-        super();
     }
 
     /**
      * This will read the required data from the stream.
-     * 
+     *
      * @param ttf The font that is being read.
      * @param data The stream to read the data from.
      * @throws IOException If there is an error reading the data.
@@ -69,7 +70,11 @@ public class PostScriptTable extends TTFTable
         mimMemType1 = data.readUnsignedInt();
         maxMemType1 = data.readUnsignedInt();
 
-        if (Float.compare(formatType, 1.0f) == 0)
+        if (data.getCurrentPosition() == data.getOriginalDataSize())
+        {
+            LOG.warn("No PostScript name data is provided for the font {}", ttf.getName());
+        }
+        else if (Float.compare(formatType, 1.0f) == 0)
         {
             // This TrueType font file contains exactly the 258 glyphs in the standard Macintosh TrueType.
             glyphNames = WGL4Names.getAllNames();
@@ -105,8 +110,9 @@ public class PostScriptTable extends TTFTable
                     catch (IOException ex)
                     {
                         // PDFBOX-4851: EOF
-                        LOG.warn("Error reading names in PostScript table at entry " + i + " of " + 
-                                 nameArray.length + ", setting remaining entries to .notdef", ex);
+                        LOG.warn(
+                                "Error reading names in PostScript table at entry {} of {}, setting remaining entries to .notdef",
+                                i, nameArray.length, ex);
                         for (int j = i; j < nameArray.length; ++j)
                         {
                             nameArray[j] = ".notdef";
@@ -156,15 +162,15 @@ public class PostScriptTable extends TTFTable
                 }
                 else
                 {
-                    LOG.debug("incorrect glyph name index " + index +
-                              ", valid numbers 0.." + WGL4Names.NUMBER_OF_MAC_GLYPHS);
+                    LOG.debug("incorrect glyph name index {}, valid numbers 0..{}",
+                            index, WGL4Names.NUMBER_OF_MAC_GLYPHS);
                 }
             }
         }
         else if (Float.compare(formatType, 3.0f) == 0)
         {
             // no postscript information is provided.
-            LOG.debug("No PostScript name information is provided for the font " + ttf.getName());
+            LOG.debug("No PostScript name information is provided for the font {}", ttf.getName());
         }
         initialized = true;
     }
@@ -331,9 +337,9 @@ public class PostScriptTable extends TTFTable
 
     /**
      * Returns the glyph name of the given GID.
-     * 
+     *
      * @param gid the GID of the glyph name
-     * 
+     *
      * @return the glyph name for the given glyph name or null
      */
     public String getName(int gid)

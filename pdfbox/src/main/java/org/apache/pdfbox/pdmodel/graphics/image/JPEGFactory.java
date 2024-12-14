@@ -42,13 +42,12 @@ import javax.xml.xpath.XPath;
 import javax.xml.xpath.XPathExpressionException;
 import javax.xml.xpath.XPathFactory;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
 import org.apache.pdfbox.cos.COSArray;
 import org.apache.pdfbox.cos.COSInteger;
 import org.apache.pdfbox.cos.COSName;
 import org.apache.pdfbox.filter.Filter;
-import org.apache.pdfbox.io.IOUtils;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.graphics.color.PDColorSpace;
 import org.apache.pdfbox.pdmodel.graphics.color.PDDeviceCMYK;
@@ -62,7 +61,7 @@ import org.w3c.dom.Element;
  */
 public final class JPEGFactory
 {
-    private static final Log LOG = LogFactory.getLog(JPEGFactory.class);
+    private static final Logger LOG = LogManager.getLogger(JPEGFactory.class);
 
     private JPEGFactory()
     {
@@ -81,7 +80,7 @@ public final class JPEGFactory
     public static PDImageXObject createFromStream(PDDocument document, InputStream stream)
             throws IOException
     {
-        return createFromByteArray(document, IOUtils.toByteArray(stream));
+        return createFromByteArray(document, stream.readAllBytes());
     }
 
     /**
@@ -149,7 +148,7 @@ public final class JPEGFactory
     private static Dimensions retrieveDimensions(ByteArrayInputStream stream) throws IOException
     {
         ImageReader reader =
-                Filter.findImageReader("JPEG", "a suitable JAI I/O image filter is not installed");
+                Filter.findRasterReader("JPEG", "a suitable JAI I/O image filter is not installed");
         try (ImageInputStream iis = ImageIO.createImageInputStream(stream))
         {
             reader.setInput(iis);
@@ -165,12 +164,12 @@ public final class JPEGFactory
                 {
                     return meta;
                 }
-                LOG.warn("No image metadata, will decode image and use raster size");
+                LOG.info("No image metadata, will decode image and use raster size");
             }
             catch (IOException ex)
             {
-                LOG.warn("Error reading image metadata, will decode image and use raster size", ex);
-            }            
+                LOG.warn("Error reading image metadata, will decode image and use raster size");
+            }
 
             // Old method: get from raster (slower)
             ImageIO.setUseCache(false);

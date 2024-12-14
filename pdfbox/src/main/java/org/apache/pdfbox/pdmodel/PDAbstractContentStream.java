@@ -33,18 +33,17 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
-import java.util.regex.Pattern;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
 import org.apache.fontbox.ttf.CmapLookup;
-import org.apache.fontbox.ttf.gsub.CompoundCharacterTokenizer;
 import org.apache.fontbox.ttf.gsub.GsubWorker;
 import org.apache.fontbox.ttf.gsub.GsubWorkerFactory;
 import org.apache.fontbox.ttf.model.GsubData;
 import org.apache.pdfbox.contentstream.operator.OperatorName;
 import org.apache.pdfbox.cos.COSArray;
 import org.apache.pdfbox.cos.COSBase;
+import org.apache.pdfbox.cos.COSDictionary;
 import org.apache.pdfbox.cos.COSName;
 import org.apache.pdfbox.cos.COSNumber;
 import org.apache.pdfbox.pdfwriter.COSWriter;
@@ -68,6 +67,7 @@ import org.apache.pdfbox.pdmodel.graphics.state.PDExtendedGraphicsState;
 import org.apache.pdfbox.pdmodel.graphics.state.RenderingMode;
 import org.apache.pdfbox.util.Matrix;
 import org.apache.pdfbox.util.NumberFormatUtil;
+import org.apache.pdfbox.util.StringUtil;
 
 /**
  * Provides the ability to write to a content stream.
@@ -76,7 +76,7 @@ import org.apache.pdfbox.util.NumberFormatUtil;
  */
 abstract class PDAbstractContentStream implements Closeable
 {
-    private static final Log LOG = LogFactory.getLog(PDAbstractContentStream.class);
+    private static final Logger LOG = LogManager.getLogger(PDAbstractContentStream.class);
 
     protected final PDDocument document; // may be null
 
@@ -186,13 +186,14 @@ abstract class PDAbstractContentStream implements Closeable
             }
             else
             {
-                LOG.warn("Using the subsetted font '" + font.getName() +
-                        "' without a PDDocument context; call subset() before saving");
+                LOG.warn(
+                        "Using the subsetted font '{}' without a PDDocument context; call subset() before saving",
+                        font.getName());
             }
         }
         else if (!font.isEmbedded() && !font.isStandard14())
         {
-            LOG.warn("attempting to use font '" + font.getName() + "' that isn't embedded");
+            LOG.warn("attempting to use font '{}' that isn't embedded", font.getName());
         }
 
         // complex text layout
@@ -205,6 +206,10 @@ abstract class PDAbstractContentStream implements Closeable
                 GsubWorker gsubWorker = gsubWorkerFactory.getGsubWorker(pdType0Font.getCmapLookup(),
                         gsubData);
                 gsubWorkers.put((PDType0Font) font, gsubWorker);
+            }
+            else
+            {
+                LOG.info("No GSUB data found in font {}", font.getName());
             }
         }
 
@@ -508,7 +513,7 @@ abstract class PDAbstractContentStream implements Closeable
         sb.append(inlineImage.getColorSpace().getName());
 
         COSArray decodeArray = inlineImage.getDecode();
-        if (decodeArray != null && decodeArray.size() > 0)
+        if (decodeArray != null && !decodeArray.isEmpty())
         {
             sb.append("\n /D ");
             sb.append('[');
@@ -692,7 +697,7 @@ abstract class PDAbstractContentStream implements Closeable
      */
     public void setStrokingColor(Color color) throws IOException
     {
-        float[] components = new float[] {
+        float[] components = {
                 color.getRed() / 255f, color.getGreen() / 255f, color.getBlue() / 255f };
         PDColor pdColor = new PDColor(components, PDDeviceRGB.INSTANCE);
         setStrokingColor(pdColor);
@@ -811,7 +816,7 @@ abstract class PDAbstractContentStream implements Closeable
      */
     public void setNonStrokingColor(Color color) throws IOException
     {
-        float[] components = new float[] {
+        float[] components = {
                 color.getRed() / 255f, color.getGreen() / 255f, color.getBlue() / 255f };
         PDColor pdColor = new PDColor(components, PDDeviceRGB.INSTANCE);
         setNonStrokingColor(pdColor);
@@ -1317,6 +1322,24 @@ abstract class PDAbstractContentStream implements Closeable
     }
 
     /**
+     * Begin a marked content sequence with a reference to the marked content identifier (MCID).
+     *
+     * @param tag the tag to be added to the content stream
+     * @param mcid the marked content identifier (MCID)
+     * @throws IOException If the content stream could not be written
+     */
+    public void beginMarkedContent(COSName tag, int mcid) throws IOException
+    {
+        if (mcid < 0)
+        {
+            throw new IllegalArgumentException("mcid should not be negative");
+        }
+        writeOperand(tag);
+        write("<</MCID " + mcid + ">> ");
+        writeOperator(OperatorName.BEGIN_MARKED_CONTENT_SEQ);
+    }
+
+    /**
      * Begin a marked content sequence with a reference to an entry in the page resources' Properties dictionary.
      *
      * @param tag the tag to be added to the content stream
@@ -1326,7 +1349,18 @@ abstract class PDAbstractContentStream implements Closeable
     public void beginMarkedContent(COSName tag, PDPropertyList propertyList) throws IOException
     {
         writeOperand(tag);
-        writeOperand(resources.add(propertyList));
+
+        COSDictionary dict = propertyList.getCOSObject();
+        if (dict.getInt(COSName.MCID) > -1 && dict.size() == 1)
+        {
+            // PDFBOX-5890: use simplified notation if there's only an MCID
+            write("<</MCID " + dict.getInt(COSName.MCID) + ">> ");
+        }
+        else
+        {
+            writeOperand(resources.add(propertyList));
+        }
+
         writeOperator(OperatorName.BEGIN_MARKED_CONTENT_SEQ);
     }
 
@@ -1610,16 +1644,18 @@ abstract class PDAbstractContentStream implements Closeable
     private byte[] encodeForGsub(GsubWorker gsubWorker,
                                  Set<Integer> glyphIds, PDType0Font font, String text) throws IOException
     {
-        Pattern spaceRegex = Pattern.compile("\\s");
-
         // break the entire chunk of text into words by splitting it with space
-        List<String> words = new CompoundCharacterTokenizer("\\s").tokenize(text);
+        String[] words = StringUtil.tokenizeOnSpace(text);
 
         ByteArrayOutputStream out = new ByteArrayOutputStream();
 
         for (String word : words)
         {
-            if (spaceRegex.matcher(word).matches())
+            if (word == null)
+            {
+                continue;
+            }
+            if (word.length() == 1 && word.isBlank())
             {
                 out.write(font.encode(word));
             }
@@ -1634,18 +1670,30 @@ abstract class PDAbstractContentStream implements Closeable
 
     private List<Integer> applyGSUBRules(GsubWorker gsubWorker, ByteArrayOutputStream out, PDType0Font font, String word) throws IOException
     {
-        char[] charArray = word.toCharArray();
-        List<Integer> originalGlyphIds = new ArrayList<>(charArray.length);
+        int[] codePointArray = word.codePoints().toArray();
+        List<Integer> originalGlyphIds = new ArrayList<>(word.codePointCount(0, word.length()));
         CmapLookup cmapLookup = font.getCmapLookup();
 
         // convert characters into glyphIds
-        for (char unicodeChar : charArray)
+        for (int codePoint : codePointArray)
         {
-            int glyphId = cmapLookup.getGlyphId(unicodeChar);
+            int glyphId = cmapLookup.getGlyphId(codePoint);
             if (glyphId <= 0)
             {
-                throw new IllegalStateException(
-                        "could not find the glyphId for the character: " + unicodeChar);
+                String source;
+                if (Character.isBmpCodePoint(codePoint))
+                {
+                    source = String.valueOf((char) codePoint);
+                }
+                else if (Character.isValidCodePoint(codePoint))
+                {
+                    source = new String(new int[] {codePoint},0,1);
+                }
+                else
+                {
+                    source = "?";
+                }
+                throw new IllegalStateException("could not find the glyphId for the character: " + source);
             }
             originalGlyphIds.add(glyphId);
         }

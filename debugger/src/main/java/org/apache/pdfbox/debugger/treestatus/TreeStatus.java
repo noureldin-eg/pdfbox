@@ -27,6 +27,7 @@ import org.apache.pdfbox.cos.COSObject;
 import org.apache.pdfbox.debugger.ui.ArrayEntry;
 import org.apache.pdfbox.debugger.ui.MapEntry;
 import org.apache.pdfbox.debugger.ui.PageEntry;
+import org.apache.pdfbox.debugger.ui.XrefEntry;
 
 /**
  * @author Khyrul Bashar
@@ -141,6 +142,11 @@ public final class TreeStatus
             PageEntry entry = (PageEntry) treeNode;
             return entry.getPath();
         }
+        else if (treeNode instanceof XrefEntry)
+        {
+            XrefEntry entry = (XrefEntry) treeNode;
+            return entry.getPath();
+        }
         throw new IllegalArgumentException("Unknown treeNode type: " + treeNode.getClass().getName());
     }
 
@@ -158,9 +164,8 @@ public final class TreeStatus
             node = node.trim();
             if (node.startsWith("["))
             {
-                node = node.replace("]", "").replace("[", "");
+                node = node.replace("]", "").replace("[", "").trim();
             }
-            node = node.trim();
             if (node.isEmpty())
             {
                 return null;
@@ -186,6 +191,11 @@ public final class TreeStatus
         {
             obj = ((ArrayEntry) obj).getValue();
         }
+        else if (obj instanceof XrefEntry)
+        {
+            obj = ((XrefEntry) obj).getObject();
+        }
+
         if (obj instanceof COSObject)
         {
             obj = ((COSObject) obj).getObject();
@@ -198,7 +208,7 @@ public final class TreeStatus
                 MapEntry entry = new MapEntry();
                 entry.setKey(COSName.getPDFName(searchStr));
                 entry.setValue(dic.getDictionaryObject(searchStr));
-                entry.setValue(dic.getItem(searchStr));
+                entry.setItem(dic.getItem(searchStr));
                 return entry;
             }
         }

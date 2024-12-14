@@ -99,9 +99,9 @@ class MatrixTest
             }
         }
 
-        float[] m1MultipliedByM1 = new float[] { 5,  8,  11,  8, 14, 20, 11, 20,  29 };
-        float[] m1MultipliedByM2 = new float[] { 29, 32, 35, 56, 62, 68, 83, 92, 101 };
-        float[] m2MultipliedByM1 = new float[] { 29, 56, 83, 32, 62, 92, 35, 68, 101 };
+        float[] m1MultipliedByM1 = { 5,  8,  11,  8, 14, 20, 11, 20,  29 };
+        float[] m1MultipliedByM2 = { 29, 32, 35, 56, 62, 68, 83, 92, 101 };
+        float[] m2MultipliedByM1 = { 29, 56, 83, 32, 62, 92, 35, 68, 101 };
 
         Matrix var1 = const1.clone();
         Matrix var2 = const2.clone();
@@ -234,7 +234,7 @@ class MatrixTest
         assertEquals(new COSFloat(5), toCOSArray.get(2));
         assertEquals(new COSFloat(8), toCOSArray.get(3));
         assertEquals(new COSFloat(2), toCOSArray.get(4));
-        assertEquals(new COSFloat(0), toCOSArray.get(5));
+        assertEquals(COSFloat.ZERO, toCOSArray.get(5));
         
     }
 

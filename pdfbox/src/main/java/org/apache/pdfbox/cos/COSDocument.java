@@ -25,8 +25,8 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.stream.Collectors;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
 import org.apache.pdfbox.io.IOUtils;
 import org.apache.pdfbox.io.RandomAccessStreamCache;
 import org.apache.pdfbox.io.RandomAccessStreamCache.StreamCacheCreateFunction;
@@ -44,7 +44,7 @@ public class COSDocument extends COSBase implements Closeable
     /**
      * Log instance.
      */
-    private static final Log LOG = LogFactory.getLog(COSDocument.class);
+    private static final Logger LOG = LogManager.getLogger(COSDocument.class);
     
     private float version = 1.4f;
 
@@ -84,7 +84,7 @@ public class COSDocument extends COSBase implements Closeable
 
     private boolean hasHybridXRef = false;
 
-    private RandomAccessStreamCache streamCache;
+    private final RandomAccessStreamCache streamCache;
 
     /**
      * Used for incremental saving, to avoid XRef object numbers from being reused.
@@ -133,43 +133,35 @@ public class COSDocument extends COSBase implements Closeable
      */
     public COSDocument(StreamCacheCreateFunction streamCacheCreateFunction, ICOSParser parser)
     {
-        this.streamCache = getStreamCache(streamCacheCreateFunction);
+        streamCache = getStreamCache(streamCacheCreateFunction);
         this.parser = parser;
     }
 
     private RandomAccessStreamCache getStreamCache(StreamCacheCreateFunction streamCacheCreateFunction)
     {
-        if (streamCache == null)
+        if (streamCacheCreateFunction == null)
         {
-            try
-            {
-                if (streamCacheCreateFunction != null)
-                {
-                    streamCache = streamCacheCreateFunction.create();
-                }
-            }
-            catch (IOException e)
-            {
-                LOG.warn(
-                        "An error occured when creating stream cache. Using memory only cache as fallback.",
-                        e);
-            }
-            finally
-            {
-                if (streamCacheCreateFunction != null)
-                {
-                    try
-                    {
-                        streamCache = IOUtils.createMemoryOnlyStreamCache().create();
-                    }
-                    catch (IOException e)
-                    {
-                        LOG.warn("An error occured when creating stream cache for fallback.", e);
-                    }
-                }
-            }
+            return null;
         }
-        return streamCache;
+        try
+        {
+            return streamCacheCreateFunction.create();
+        }
+        catch (IOException exception1)
+        {
+            LOG.warn(
+                    "An error occured when creating stream cache. Using memory only cache as fallback.",
+                    exception1);
+        }
+        try
+        {
+            return IOUtils.createMemoryOnlyStreamCache().create();
+        }
+        catch (IOException exception2)
+        {
+            LOG.warn("An error occured when creating stream cache for fallback.", exception2);
+        }
+        return null;
     }
 
     /**
@@ -203,6 +195,7 @@ public class COSDocument extends COSBase implements Closeable
         COSStream stream = new COSStream(streamCache,
                 parser.createRandomAccessReadView(startPosition, streamLength));
         dictionary.forEach(stream::setItem);
+        stream.setKey(dictionary.getKey());
         return stream;
     }
 
@@ -258,12 +251,27 @@ public class COSDocument extends COSBase implements Closeable
      */
     public List<COSObject> getObjectsByType(COSName type1, COSName type2)
     {
+        List<COSObjectKey> originKeys = new ArrayList<>(xrefTable.keySet());
+        List<COSObject> retval = getObjectsByType(originKeys, type1, type2);
+        // there might be some additional objects if the brute force parser was triggered
+        // due to a broken cross reference table/stream
+        if (originKeys.size() < xrefTable.size())
+        {
+            List<COSObjectKey> additionalKeys = new ArrayList<>(xrefTable.keySet());
+            additionalKeys.removeAll(originKeys);
+            retval.addAll(getObjectsByType(additionalKeys, type1, type2));
+        }
+        return retval;
+    }
+
+    private List<COSObject> getObjectsByType(List<COSObjectKey> keys, COSName type1, COSName type2)
+    {
         List<COSObject> retval = new ArrayList<>();
-        for (COSObjectKey objectKey : xrefTable.keySet())
+        for (COSObjectKey objectKey : keys)
         {
             COSObject objectFromPool = getObjectFromPool(objectKey);
             COSBase realObject = objectFromPool.getObject();
-            if( realObject instanceof COSDictionary )
+            if (realObject instanceof COSDictionary)
             {
                 COSName dictType = ((COSDictionary) realObject).getCOSName(COSName.TYPE);
                 if (type1.equals(dictType) || (type2 != null && type2.equals(dictType)))
@@ -356,7 +364,10 @@ public class COSDocument extends COSBase implements Closeable
     }
 
     /**
-     * This will set the document ID.
+     * This will set the document ID. This should be an array of two strings. This method cannot be
+     * used to remove the document id by passing null or an empty array; it will be recreated. Only
+     * the first existing string is used when writing, the second one is always recreated. If you
+     * don't want this, you'll have to modify the {@code COSWriter} class, look for {@link COSName#ID}.
      *
      * @param id The document id.
      */

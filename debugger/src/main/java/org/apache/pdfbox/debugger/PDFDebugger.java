@@ -17,11 +17,13 @@
 package org.apache.pdfbox.debugger;
 
 import java.awt.BorderLayout;
+import java.awt.Color;
 import java.awt.Component;
 import java.awt.Cursor;
 import java.awt.Dimension;
 import java.awt.FileDialog;
 import java.awt.Frame;
+import java.awt.Rectangle;
 import java.awt.Toolkit;
 import java.awt.datatransfer.DataFlavor;
 import java.awt.datatransfer.Transferable;
@@ -32,13 +34,17 @@ import java.awt.event.KeyEvent;
 import java.awt.event.WindowEvent;
 import java.awt.print.PrinterException;
 import java.awt.print.PrinterJob;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.PrintStream;
 import java.lang.reflect.Method;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
@@ -54,7 +60,10 @@ import javax.print.attribute.PrintRequestAttributeSet;
 import javax.print.attribute.standard.Sides;
 import javax.swing.AbstractAction;
 import javax.swing.Action;
+import javax.swing.Box;
 import javax.swing.JComponent;
+import javax.swing.JDialog;
+import javax.swing.JEditorPane;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JMenu;
@@ -68,13 +77,15 @@ import javax.swing.KeyStroke;
 import javax.swing.TransferHandler;
 import javax.swing.UIManager;
 import javax.swing.border.BevelBorder;
+import javax.swing.event.HyperlinkEvent;
+import javax.swing.event.HyperlinkListener;
 import javax.swing.event.TreeSelectionEvent;
 import javax.swing.filechooser.FileFilter;
 import javax.swing.filechooser.FileNameExtensionFilter;
 import javax.swing.tree.TreePath;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
 
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.cos.COSArray;
@@ -95,11 +106,13 @@ import org.apache.pdfbox.debugger.colorpane.CSSeparation;
 import org.apache.pdfbox.debugger.flagbitspane.FlagBitsPane;
 import org.apache.pdfbox.debugger.fontencodingpane.FontEncodingPaneController;
 import org.apache.pdfbox.debugger.pagepane.PagePane;
+import org.apache.pdfbox.debugger.signaturepane.SignaturePane;
 import org.apache.pdfbox.debugger.streampane.StreamPane;
 import org.apache.pdfbox.debugger.stringpane.StringPane;
 import org.apache.pdfbox.debugger.treestatus.TreeStatus;
 import org.apache.pdfbox.debugger.treestatus.TreeStatusPane;
 import org.apache.pdfbox.debugger.ui.ArrayEntry;
+import org.apache.pdfbox.debugger.ui.DebugLogAppender;
 import org.apache.pdfbox.debugger.ui.DocumentEntry;
 import org.apache.pdfbox.debugger.ui.ErrorDialog;
 import org.apache.pdfbox.debugger.ui.FileOpenSaveDialog;
@@ -117,11 +130,13 @@ import org.apache.pdfbox.debugger.ui.RenderDestinationMenu;
 import org.apache.pdfbox.debugger.ui.RotationMenu;
 import org.apache.pdfbox.debugger.ui.TextDialog;
 import org.apache.pdfbox.debugger.ui.Tree;
+import org.apache.pdfbox.debugger.ui.TreeViewMenu;
 import org.apache.pdfbox.debugger.ui.ViewMenu;
 import org.apache.pdfbox.debugger.ui.WindowPrefs;
+import org.apache.pdfbox.debugger.ui.XrefEntries;
+import org.apache.pdfbox.debugger.ui.XrefEntry;
 import org.apache.pdfbox.debugger.ui.ZoomMenu;
 import org.apache.pdfbox.filter.FilterFactory;
-import org.apache.pdfbox.io.IOUtils;
 import org.apache.pdfbox.io.RandomAccessReadBuffer;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.common.PDPageLabels;
@@ -149,9 +164,9 @@ import picocli.CommandLine.Model.CommandSpec;
  */
 @SuppressWarnings({ "serial", "squid:MaximumInheritanceDepth", "squid:S1948" })
 @Command(name = "pdfdebugger", description = "Analyzes and inspects the internal structure of a PDF document")
-public class PDFDebugger extends JFrame implements Callable<Integer>
+public class PDFDebugger extends JFrame implements Callable<Integer>, HyperlinkListener
 {
-    private static Log LOG; // needs late initialization
+    private static Logger LOG; // needs late initialization
 
     private static final Set<COSName> SPECIALCOLORSPACES = new HashSet<>(
             Arrays.asList(COSName.INDEXED, COSName.SEPARATION, COSName.DEVICEN));
@@ -189,10 +204,13 @@ public class PDFDebugger extends JFrame implements Callable<Integer>
     private JMenuItem findNextMenuItem;
     private JMenuItem findPreviousMenuItem;
 
+    // current view mode of the tree
+    private String currentTreeViewMode = TreeViewMenu.VIEW_PAGES;
+
     // cli options
     // Expected for CLI app to write to System.out/System.err
     @SuppressWarnings("squid:S106")
-    private static final PrintStream SYSERR = System.err;
+    private final PrintStream SYSERR;
 
     @Option(names = { "-h", "--help" }, usageHelp = true, description = "display this help message")
     boolean usageHelpRequested;
@@ -216,17 +234,30 @@ public class PDFDebugger extends JFrame implements Callable<Integer>
      */
     public PDFDebugger()
     {
+        if (viewstructure)
+        {
+            currentTreeViewMode = TreeViewMenu.VIEW_STRUCTURE;
+        }
+        SYSERR = System.err;
     }
 
     /**
      * Constructor.
      *
-     * @param isPageMode true if pages are to be displayed, false if internal
-     *                   structure is to be displayed.
+     * @param initialViewMode initial view mode for the tree view on the left hand side.
+     * 
      */
-    public PDFDebugger(boolean isPageMode)
+    public PDFDebugger(String initialViewMode)
     {
-        viewstructure = !isPageMode;
+        SYSERR = System.err;
+        if (TreeViewMenu.isValidViewMode(initialViewMode))
+        {
+            currentTreeViewMode = initialViewMode;
+        }
+        else
+        {
+            SYSERR.println("Unknown view mode " + initialViewMode);
+        }
     }
 
     /**
@@ -250,7 +281,7 @@ public class PDFDebugger extends JFrame implements Callable<Integer>
         {
             // can't be initialized earlier because it's an awt call which would fail when
             // PDFBox.main runs on a headless system
-            shortcutKeyMask = Toolkit.getDefaultToolkit().getMenuShortcutKeyMask();
+            shortcutKeyMask = Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx();
 
             UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
             if (System.getProperty("apple.laf.useScreenMenuBar") == null)
@@ -270,8 +301,8 @@ public class PDFDebugger extends JFrame implements Callable<Integer>
             // and if there are no methods that call logging, even invisible
             // use reduced file from PDFBOX-3653 to see logging
             LogDialog.init(this,statusBar.getLogLabel());
-            System.setProperty("org.apache.commons.logging.Log", "org.apache.pdfbox.debugger.ui.DebugLog");
-            LOG = LogFactory.getLog(PDFDebugger.class);
+            DebugLogAppender.setupCustomLogger();
+            LOG = LogManager.getLogger(PDFDebugger.class);
 
             TextDialog.init(this);
 
@@ -297,16 +328,28 @@ public class PDFDebugger extends JFrame implements Callable<Integer>
         return 0;
     }
 
-    public boolean isPageMode()
+    /**
+     * Provide the current view mode of the tree view. see {@link TreeViewMenu} for valid values
+     */
+    public String getTreeViewMode()
     {
-        return !viewstructure;
+        return currentTreeViewMode;
     }
-    
-    public void setPageMode(boolean isPageMode)
+
+    /**
+     * Set the current view mode of the tree view. see {@link TreeViewMenu} for valid values
+     * 
+     * @param viewMode the view mode to be set
+     * 
+     */
+    public void setTreeViewMode(String viewMode)
     {
-        viewstructure = !isPageMode;
+        if (TreeViewMenu.isValidViewMode(viewMode))
+        {
+            currentTreeViewMode = viewMode;
+        }
     }
-    
+
     public boolean hasDocument()
     {
         return document != null;
@@ -408,6 +451,18 @@ public class PDFDebugger extends JFrame implements Callable<Integer>
         menuBar.add(viewMenu.getMenu());
         setJMenuBar(menuBar);
 
+        menuBar.add(Box.createHorizontalGlue());
+        JMenu help = new JMenu("Help");
+        help.setMnemonic(KeyEvent.VK_H);
+
+        JMenuItem item = new JMenuItem("About PDFBox", KeyEvent.VK_A);
+        item.setActionCommand("about");
+        item.addActionListener(actionEvent ->
+                textDialog("About Apache PDFBox", PDFDebugger.class.getResource("about.html")));
+        help.add(item);
+
+        menuBar.add(help);
+
         setExtendedState(windowPrefs.getExtendedState());
         setBounds(windowPrefs.getBounds());
 
@@ -499,7 +554,7 @@ public class PDFDebugger extends JFrame implements Callable<Integer>
             {
                 readPDFurl(urlString, "");
             }
-            catch (IOException e)
+            catch (IOException | URISyntaxException e)
             {
                 throw new RuntimeException(e);
             }
@@ -512,7 +567,7 @@ public class PDFDebugger extends JFrame implements Callable<Integer>
         {
             try
             {
-                if (currentFilePath.startsWith("http"))
+                if (currentFilePath.startsWith("http") || currentFilePath.startsWith("file:"))
                 {
                     readPDFurl(currentFilePath, "");
                 }
@@ -521,7 +576,7 @@ public class PDFDebugger extends JFrame implements Callable<Integer>
                     readPDFFile(currentFilePath, "");
                 }
             }
-            catch (IOException e)
+            catch (IOException | URISyntaxException e)
             {
                 new ErrorDialog(e).setVisible(true);
             }
@@ -549,7 +604,6 @@ public class PDFDebugger extends JFrame implements Callable<Integer>
         fileMenu.add(printMenuItem);
 
         printDpiMenu = PrintDpiMenu.getInstance().getMenu();
-        printDpiMenu.setEnabled(false);
         fileMenu.add(printDpiMenu);
 
         if (!IS_MAC_OS)
@@ -678,7 +732,7 @@ public class PDFDebugger extends JFrame implements Callable<Integer>
         {
             readPDFFile(filename, "");
         }
-        catch (IOException e)
+        catch (IOException | URISyntaxException e)
         {
             new ErrorDialog(e).setVisible(true);
         }
@@ -745,7 +799,7 @@ public class PDFDebugger extends JFrame implements Callable<Integer>
                 }
             }
         }
-        catch (IOException e)
+        catch (IOException | URISyntaxException e)
         {
             new ErrorDialog(e).setVisible(true);
         }
@@ -762,6 +816,17 @@ public class PDFDebugger extends JFrame implements Callable<Integer>
                 
                 statusBar.getStatusLabel().setText("");
                 
+                if (selectedNode instanceof XrefEntry)
+                {
+                    if (jSplitPane.getRightComponent() == null
+                            || !jSplitPane.getRightComponent().equals(jScrollPaneRight))
+                    {
+                        replaceRightComponent(jScrollPaneRight);
+                    }
+                    jTextPane.setText(convertToString(selectedNode));
+                    return;
+                }
+
                 if (isPage(selectedNode))
                 {
                     showPage(selectedNode);
@@ -790,6 +855,12 @@ public class PDFDebugger extends JFrame implements Callable<Integer>
                     showFont(selectedNode, path);
                     return;
                 }
+                if (path.getParentPath() != null &&
+                    isSignature(selectedNode, path.getParentPath().getLastPathComponent()))
+                {
+                    showSignaturePane(selectedNode);
+                    return;
+                }
                 if (isString(selectedNode))
                 {
                     showString(selectedNode);
@@ -810,13 +881,47 @@ public class PDFDebugger extends JFrame implements Callable<Integer>
         }
     }
 
+    private void showSignaturePane(Object selectedNode)
+    {
+        COSBase base = getUnderneathObject(selectedNode);
+        if (base instanceof COSString)
+        {
+            replaceRightComponent(new SignaturePane((COSString) base).getPane());
+        }
+    }
+
+    private boolean isSignature(Object selectedNode, Object parentNode)
+    {
+        if (selectedNode instanceof MapEntry)
+        {
+            MapEntry entry = (MapEntry) selectedNode;
+            if (entry.getKey().equals(COSName.CONTENTS) &&
+                    parentNode instanceof MapEntry)
+            {
+                MapEntry mapEntry = (MapEntry) parentNode;
+                COSDictionary sigDict;
+                if (mapEntry.getValue() instanceof COSDictionary)
+                {
+                    sigDict = (COSDictionary)mapEntry.getValue();
+                    COSName type = sigDict.getCOSName(COSName.TYPE);
+                    if (type != null && type.equals(COSName.SIG))
+                    {
+                        LOG.info("Found signature contents entry");
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
     private boolean isSpecialColorSpace(Object selectedNode)
     {
-        selectedNode = getUnderneathObject(selectedNode);
+        COSBase underneathObject = getUnderneathObject(selectedNode);
 
-        if (selectedNode instanceof COSArray && ((COSArray) selectedNode).size() > 0)
+        if (underneathObject instanceof COSArray && ((COSArray) underneathObject).size() > 0)
         {
-            COSBase arrayEntry = ((COSArray)selectedNode).get(0);
+            COSBase arrayEntry = ((COSArray) underneathObject).get(0);
             if (arrayEntry instanceof COSName)
             {
                 COSName name = (COSName) arrayEntry;
@@ -828,11 +933,11 @@ public class PDFDebugger extends JFrame implements Callable<Integer>
 
     private boolean isOtherColorSpace(Object selectedNode)
     {
-        selectedNode = getUnderneathObject(selectedNode);
+        COSBase underneathObject = getUnderneathObject(selectedNode);
 
-        if (selectedNode instanceof COSArray && ((COSArray) selectedNode).size() > 0)
+        if (underneathObject instanceof COSArray && ((COSArray) underneathObject).size() > 0)
         {
-            COSBase arrayEntry = ((COSArray)selectedNode).get(0);
+            COSBase arrayEntry = ((COSArray) underneathObject).get(0);
             if (arrayEntry instanceof COSName)
             {
                 COSName name = (COSName) arrayEntry;
@@ -844,20 +949,16 @@ public class PDFDebugger extends JFrame implements Callable<Integer>
 
     private boolean isPage(Object selectedNode)
     {
-        selectedNode = getUnderneathObject(selectedNode);
+        COSBase underneathObject = getUnderneathObject(selectedNode);
 
-        if (selectedNode instanceof COSDictionary)
+        if (underneathObject instanceof COSDictionary)
         {
-            COSDictionary dict = (COSDictionary) selectedNode;
+            COSDictionary dict = (COSDictionary) underneathObject;
             COSBase typeItem = dict.getItem(COSName.TYPE);
             if (COSName.PAGE.equals(typeItem))
             {
                 return true;
             }
-        }
-        else if (selectedNode instanceof PageEntry)
-        {
-            return true;
         }
         return false;
     }
@@ -889,14 +990,14 @@ public class PDFDebugger extends JFrame implements Callable<Integer>
 
     private boolean isFontDescriptor(Object obj)
     {
-        Object underneathObject = getUnderneathObject(obj);
+        COSBase underneathObject = getUnderneathObject(obj);
         return underneathObject instanceof COSDictionary &&
                 COSName.FONT_DESC.equals(((COSDictionary) underneathObject).getCOSName(COSName.TYPE));
     }
 
     private boolean isAnnot(Object obj)
     {
-        Object underneathObject = getUnderneathObject(obj);
+        COSBase underneathObject = getUnderneathObject(obj);
         return underneathObject instanceof COSDictionary &&
                 COSName.ANNOT.equals(((COSDictionary) underneathObject).getCOSName(COSName.TYPE));
     }
@@ -913,10 +1014,10 @@ public class PDFDebugger extends JFrame implements Callable<Integer>
 
     private boolean isFont(Object selectedNode)
     {
-        selectedNode = getUnderneathObject(selectedNode);
-        if (selectedNode instanceof COSDictionary)
+        COSBase underneathObject = getUnderneathObject(selectedNode);
+        if (underneathObject instanceof COSDictionary)
         {
-            COSDictionary dic = (COSDictionary) selectedNode;
+            COSDictionary dic = (COSDictionary) underneathObject;
             return COSName.FONT.equals(dic.getCOSName(COSName.TYPE)) && !isCIDFont(dic);
         }
         return false;
@@ -934,11 +1035,11 @@ public class PDFDebugger extends JFrame implements Callable<Integer>
      */
     private void showColorPane(Object csNode) throws IOException
     {
-        csNode = getUnderneathObject(csNode);
+        COSBase underneathObject = getUnderneathObject(csNode);
 
-        if (csNode instanceof COSArray && ((COSArray) csNode).size() > 0)
+        if (underneathObject instanceof COSArray && ((COSArray) underneathObject).size() > 0)
         {
-            COSArray array = (COSArray)csNode;
+            COSArray array = (COSArray) underneathObject;
             COSBase arrayEntry = array.get(0);
             if (arrayEntry instanceof COSName)
             {
@@ -965,36 +1066,28 @@ public class PDFDebugger extends JFrame implements Callable<Integer>
 
     private void showPage(Object selectedNode)
     {
-        selectedNode = getUnderneathObject(selectedNode);
-
-        COSDictionary page;
-        if (selectedNode instanceof COSDictionary)
+        COSBase underneathObject = getUnderneathObject(selectedNode);
+        if (underneathObject instanceof COSDictionary)
         {
-            page = (COSDictionary) selectedNode;
-        }
-        else
-        {
-            page = ((PageEntry) selectedNode).getDict();
-        }
-
-        COSBase typeItem = page.getItem(COSName.TYPE);
-        if (COSName.PAGE.equals(typeItem))
-        {
-            PagePane pagePane = new PagePane(document, page, statusBar.getStatusLabel());
-            replaceRightComponent(new JScrollPane(pagePane.getPanel()));
+            COSDictionary page = (COSDictionary) underneathObject;
+            COSBase typeItem = page.getItem(COSName.TYPE);
+            if (COSName.PAGE.equals(typeItem))
+            {
+                PagePane pagePane = new PagePane(document, page, statusBar.getStatusLabel());
+                replaceRightComponent(new JScrollPane(pagePane.getPanel()));
+            }
         }
     }
 
     private void showFlagPane(Object parentNode, Object selectedNode)
     {
-        parentNode = getUnderneathObject(parentNode);
-        if (parentNode instanceof COSDictionary)
+        COSBase underneathParentObject = getUnderneathObject(parentNode);
+        if (underneathParentObject instanceof COSDictionary)
         {
-            selectedNode = ((MapEntry)selectedNode).getKey();
-            selectedNode = getUnderneathObject(selectedNode);
+            COSName selectedNodeName = ((MapEntry) selectedNode).getKey();
             FlagBitsPane flagBitsPane = new FlagBitsPane(document,
-                    (COSDictionary) parentNode,
-                    (COSName) selectedNode);
+                    (COSDictionary) underneathParentObject,
+                    selectedNodeName);
             replaceRightComponent(flagBitsPane.getPane());
         }
     }
@@ -1012,14 +1105,20 @@ public class PDFDebugger extends JFrame implements Callable<Integer>
         {
             Object pageObj = path.getParentPath().getLastPathComponent();
             COSDictionary page = (COSDictionary) getUnderneathObject(pageObj);
-            resourcesDic = page.getCOSDictionary(COSName.RESOURCES);
+            if (page != null)
+            {
+                resourcesDic = page.getCOSDictionary(COSName.RESOURCES);
+            }
             isContentStream = true;
         }
         else if (COSName.CONTENTS.equals(parentKey) || COSName.CHAR_PROCS.equals(parentKey))
         {
             Object pageObj = path.getParentPath().getParentPath().getLastPathComponent();
             COSDictionary page = (COSDictionary) getUnderneathObject(pageObj);
-            resourcesDic = page.getCOSDictionary(COSName.RESOURCES);
+            if (page != null)
+            {
+                resourcesDic = page.getCOSDictionary(COSName.RESOURCES);
+            }
             isContentStream = true;
         }
         else if (COSName.FORM.equals(stream.getCOSName(COSName.SUBTYPE)) ||
@@ -1040,7 +1139,11 @@ public class PDFDebugger extends JFrame implements Callable<Integer>
         {
             // not to be used for /Thumb, even if it contains /Subtype /Image
             Object resourcesObj = path.getParentPath().getParentPath().getLastPathComponent();
-            resourcesDic = (COSDictionary) getUnderneathObject(resourcesObj);
+            // resources may be unreachable if the selected node is on the first level of a cross reference table
+            if (!(resourcesObj instanceof XrefEntries))
+            {
+                resourcesDic = (COSDictionary) getUnderneathObject(resourcesObj);
+            }
         }
         StreamPane streamPane = new StreamPane(stream, isContentStream, isThumb, resourcesDic);
         replaceRightComponent(streamPane.getPanel());
@@ -1048,11 +1151,18 @@ public class PDFDebugger extends JFrame implements Callable<Integer>
 
     private void showFont(Object selectedNode, TreePath path)
     {
+        JPanel pane = null;
         COSName fontName = getNodeKey(selectedNode);
-        COSDictionary resourceDic = (COSDictionary) getUnderneathObject(path.getParentPath().getParentPath().getLastPathComponent());
+        // may be null if the selected node is on the first level of a cross reference table
+        if (fontName != null)
+        {
+            COSDictionary resourceDic = (COSDictionary) getUnderneathObject(
+                    path.getParentPath().getParentPath().getLastPathComponent());
 
-        FontEncodingPaneController fontEncodingPaneController = new FontEncodingPaneController(fontName, resourceDic);
-        JPanel pane = fontEncodingPaneController.getPane();
+            FontEncodingPaneController fontEncodingPaneController = new FontEncodingPaneController(
+                    fontName, resourceDic);
+            pane = fontEncodingPaneController.getPane();
+        }
         if (pane == null)
         {
             // unsupported font type
@@ -1085,52 +1195,54 @@ public class PDFDebugger extends JFrame implements Callable<Integer>
         return null;
     }
 
-    private Object getUnderneathObject(Object selectedNode)
+    private COSBase getUnderneathObject(Object selectedNode)
     {
         if (selectedNode instanceof MapEntry)
         {
-            selectedNode = ((MapEntry) selectedNode).getValue();
+            return ((MapEntry) selectedNode).getValue();
         }
         else if (selectedNode instanceof ArrayEntry)
         {
-            selectedNode = ((ArrayEntry) selectedNode).getValue();
+            return ((ArrayEntry) selectedNode).getValue();
         }
         else if (selectedNode instanceof PageEntry)
         {
-            selectedNode = ((PageEntry) selectedNode).getDict();
+            return ((PageEntry) selectedNode).getDict();
         }
-
+        else if (selectedNode instanceof XrefEntry)
+        {
+            return ((XrefEntry) selectedNode).getCOSObject();
+        }
         if (selectedNode instanceof COSObject)
         {
-            selectedNode = ((COSObject) selectedNode).getObject();
+            return ((COSObject) selectedNode).getObject();
         }
-        return selectedNode;
+        return null;
     }
 
     private String convertToString( Object selectedNode )
     {
-        String data = null;
         if(selectedNode instanceof COSBoolean)
         {
-            data = "" + ((COSBoolean)selectedNode).getValue();
+            return Boolean.toString(((COSBoolean) selectedNode).getValue());
         }
-        else if( selectedNode instanceof COSFloat )
+        if (selectedNode instanceof COSFloat)
         {
-            data = "" + ((COSFloat)selectedNode).floatValue();
+            return Float.toString(((COSFloat) selectedNode).floatValue());
         }
-        else if( selectedNode instanceof COSNull )
+        if (selectedNode instanceof COSNull)
         {
-            data = "null";
+            return "null";
         }
-        else if( selectedNode instanceof COSInteger )
+        if (selectedNode instanceof COSInteger)
         {
-            data = "" + ((COSInteger)selectedNode).intValue();
+            return Long.toString(((COSInteger) selectedNode).longValue());
         }
-        else if( selectedNode instanceof COSName )
+        if (selectedNode instanceof COSName)
         {
-            data = "" + ((COSName)selectedNode).getName();
+            return ((COSName) selectedNode).getName();
         }
-        else if( selectedNode instanceof COSString )
+        if (selectedNode instanceof COSString)
         {
             String text = ((COSString) selectedNode).getString();
             // display unprintable strings as hex
@@ -1142,16 +1254,16 @@ public class PDFDebugger extends JFrame implements Callable<Integer>
                     break;
                 }
             }
-            data = "" + text;
+            return text;
         }
-        else if( selectedNode instanceof COSStream )
+        if (selectedNode instanceof COSStream)
         {
             try
             {
                 COSStream stream = (COSStream) selectedNode;
                 try (InputStream in = stream.createInputStream())
                 {
-                    data = new String(IOUtils.toByteArray(in));
+                    return new String(in.readAllBytes());
                 }
             }
             catch( IOException e )
@@ -1159,15 +1271,29 @@ public class PDFDebugger extends JFrame implements Callable<Integer>
                 throw new RuntimeException(e);
             }
         }
-        else if( selectedNode instanceof MapEntry )
+        if (selectedNode instanceof COSDictionary)
         {
-            data = convertToString( ((MapEntry)selectedNode).getValue() );
+            // just a placeholder, the values are shown within the tree on the left hand side
+            return "COSDictionary";
         }
-        else if( selectedNode instanceof ArrayEntry )
+        if (selectedNode instanceof COSArray)
         {
-            data = convertToString( ((ArrayEntry)selectedNode).getValue() );
+            // just a placeholder, the values are shown within the tree on the left hand side
+            return "COSArray";
         }
-        return data;
+        if (selectedNode instanceof MapEntry)
+        {
+            return convertToString(((MapEntry) selectedNode).getValue());
+        }
+        if (selectedNode instanceof ArrayEntry)
+        {
+            return convertToString(((ArrayEntry) selectedNode).getValue());
+        }
+        if (selectedNode instanceof XrefEntry)
+        {
+            return selectedNode.toString();
+        }
+        return null;
     }
     
     private void exitMenuItemActionPerformed(ActionEvent ignored)
@@ -1250,7 +1376,7 @@ public class PDFDebugger extends JFrame implements Callable<Integer>
                     job.print(pras);
                     long t1 = System.nanoTime();
                     long ms = TimeUnit.MILLISECONDS.convert(t1 - t0, TimeUnit.NANOSECONDS);
-                    LOG.info("Printed in " + ms + " ms");
+                    LOG.info("Printed in {} ms", ms);
                 }
                 finally
                 {
@@ -1264,13 +1390,13 @@ public class PDFDebugger extends JFrame implements Callable<Integer>
         }
     }
 
-    private void readPDFFile(String filePath, String password) throws IOException
+    private void readPDFFile(String filePath, String password) throws IOException, URISyntaxException
     {
         File file = new File(filePath);
         readPDFFile(file, password);
     }
     
-    private void readPDFFile(final File file, String password) throws IOException
+    private void readPDFFile(final File file, String password) throws IOException, URISyntaxException
     {
         if( document != null )
         {
@@ -1294,13 +1420,12 @@ public class PDFDebugger extends JFrame implements Callable<Integer>
                 PDDocument doc = Loader.loadPDF(file, password);
                 long t1 = System.nanoTime();
                 long ms = TimeUnit.MILLISECONDS.convert(t1 - t0, TimeUnit.NANOSECONDS);
-                LOG.info("Parsed in " + ms + " ms");
+                LOG.info("Parsed in {} ms", ms);
                 return doc;
             }
         };
         document = documentOpener.parse();
         printMenuItem.setEnabled(true);
-        printDpiMenu.setEnabled(true);
         reopenMenuItem.setEnabled(true);
         saveAsMenuItem.setEnabled(true);
         
@@ -1317,8 +1442,9 @@ public class PDFDebugger extends JFrame implements Callable<Integer>
         }
         addRecentFileItems();
     }
-    
-    private void readPDFurl(final String urlString, String password) throws IOException
+
+    private void readPDFurl(final String urlString, String password)
+            throws IOException, URISyntaxException
     {
         if (document != null)
         {
@@ -1335,14 +1461,14 @@ public class PDFDebugger extends JFrame implements Callable<Integer>
         DocumentOpener documentOpener = new DocumentOpener(password)
         {
             @Override
-            PDDocument open() throws IOException
+            PDDocument open() throws IOException, URISyntaxException
             {
                 long t0 = System.nanoTime();
                 PDDocument doc = Loader.loadPDF(RandomAccessReadBuffer
-                        .createBufferFromStream(new URL(urlString).openStream()), password);
+                        .createBufferFromStream(new URI(urlString).toURL().openStream()), password);
                 long t1 = System.nanoTime();
                 long ms = TimeUnit.MILLISECONDS.convert(t1 - t0, TimeUnit.NANOSECONDS);
-                LOG.info("Parsed in " + ms + " ms");
+                LOG.info("Parsed in {} ms", ms);
                 return doc;
             }
         };
@@ -1363,28 +1489,37 @@ public class PDFDebugger extends JFrame implements Callable<Integer>
         }
         addRecentFileItems();
     }
-    
+
     public void initTree()
     {
         TreeStatus treeStatus = new TreeStatus(document.getDocument().getTrailer());
         statusPane.updateTreeStatus(treeStatus);
         
-        if (!viewstructure)
+        String treeViewMode = TreeViewMenu.getInstance().getTreeViewSelection();
+        if (TreeViewMenu.VIEW_PAGES.equals(treeViewMode))
         {
             File file = new File(currentFilePath);
             DocumentEntry documentEntry = new DocumentEntry(document, file.getName());
             ZoomMenu.getInstance().resetZoom();
             RotationMenu.getInstance().setRotationSelection(RotationMenu.ROTATE_0_DEGREES);
             ImageTypeMenu.getInstance().setImageTypeSelection(ImageTypeMenu.IMAGETYPE_RGB);
-            RenderDestinationMenu.getInstance().setRenderDestinationSelection(RenderDestinationMenu.RENDER_DESTINATION_EXPORT);
+            RenderDestinationMenu.getInstance()
+                    .setRenderDestinationSelection(RenderDestinationMenu.RENDER_DESTINATION_EXPORT);
             tree.setModel(new PDFTreeModel(documentEntry));
             // Root/Pages/Kids/[0] is not always the first page, so use the first row instead:
             tree.setSelectionPath(tree.getPathForRow(1));
         }
-        else
+        else if (TreeViewMenu.VIEW_STRUCTURE.equals(treeViewMode))
         {
             tree.setModel(new PDFTreeModel(document));
             tree.setSelectionPath(treeStatus.getPathForString("Root"));
+            tree.setSelectionPath(tree.getPathForRow(1));
+        }
+        else if (TreeViewMenu.VIEW_CROSS_REF_TABLE.equals(treeViewMode))
+        {
+            tree.setModel(new PDFTreeModel(new XrefEntries(document)));
+            tree.setSelectionPath(treeStatus.getPathForString("CRT"));
+            tree.setSelectionPath(tree.getPathForRow(1));
         }
     }
 
@@ -1405,8 +1540,9 @@ public class PDFDebugger extends JFrame implements Callable<Integer>
          * 
          * @return the PDDocument instance
          * @throws IOException Cannot read document
+         * @throws URISyntaxException
          */
-        abstract PDDocument open() throws IOException;
+        abstract PDDocument open() throws IOException, URISyntaxException;
 
         /**
          * Call this!
@@ -1414,7 +1550,7 @@ public class PDFDebugger extends JFrame implements Callable<Integer>
          * @return the PDDocument instance
          * @throws IOException Cannot read document
          */
-        final PDDocument parse() throws IOException 
+        final PDDocument parse() throws IOException, URISyntaxException 
         {
             while (true)
             {
@@ -1430,8 +1566,7 @@ public class PDFDebugger extends JFrame implements Callable<Integer>
                     JPasswordField pass = new JPasswordField(10);
                     panel.add(label);
                     panel.add(pass);
-                    String[] options = new String[]
-                    {
+                    String[] options = {
                         "OK", "Cancel"
                     };
                     int option = JOptionPane.showOptionDialog(null, panel, "Enter password",
@@ -1501,7 +1636,7 @@ public class PDFDebugger extends JFrame implements Callable<Integer>
         {
             return ex.getMessage();
         }
-        if (pageLabels != null)
+        if (pageLabels != null && pageIndex >= 0)
         {
             String[] labels = pageLabels.getLabelsByPageIndices();
             if (labels[pageIndex] != null)
@@ -1510,5 +1645,78 @@ public class PDFDebugger extends JFrame implements Callable<Integer>
             }
         }
         return null;
+    }
+
+    private void textDialog(String title, URL resource)
+    {
+        try
+        {
+            JDialog dialog = new JDialog(this, title, true);
+            JEditorPane editor = new JEditorPane(resource);
+            editor.setContentType("text/html");
+            editor.setEditable(false);
+            editor.setBackground(Color.WHITE);
+            editor.setPreferredSize(new Dimension(400, 250));
+
+            // put it in the middle of the parent, but not outside of the screen
+            // GraphicsEnvironment.getLocalGraphicsEnvironment().getDefaultScreenDevice()
+            // doesn't work give the numbers we need
+            Dimension screenSize = Toolkit.getDefaultToolkit().getScreenSize();
+            double screenWidth = screenSize.getWidth();
+            double screenHeight = screenSize.getHeight();
+            Rectangle parentBounds = this.getBounds();
+            editor.addHyperlinkListener(this);
+            dialog.add(editor);
+            dialog.pack();
+
+            int x = (int) (parentBounds.getX() + (parentBounds.getWidth() - editor.getWidth()) / 2);
+            int y = (int) (parentBounds.getY() + (parentBounds.getHeight() - editor.getHeight()) / 2);
+            x = (int) Math.min(x, screenWidth * 3 / 4);
+            y = (int) Math.min(y, screenHeight * 3 / 4);
+            x = Math.max(0, x);
+            y = Math.max(0, y);
+            dialog.setLocation(x, y);
+
+            dialog.setVisible(true);
+        }
+        catch (IOException ex)
+        {
+            new ErrorDialog(ex).setVisible(true);
+        }
+    }
+    
+    @Override
+    public void hyperlinkUpdate(HyperlinkEvent he)
+    {
+        if (he.getEventType() == HyperlinkEvent.EventType.ACTIVATED)
+        {
+            try
+            {
+                URL url = he.getURL();
+                try (InputStream stream = url.openStream())
+                {
+                    ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                    stream.transferTo(baos);
+                    JEditorPane editor
+                            = new JEditorPane("text/plain", baos.toString(StandardCharsets.UTF_8));
+                    editor.setEditable(false);
+                    editor.setBackground(Color.WHITE);
+                    editor.setCaretPosition(0);
+                    editor.setPreferredSize(new Dimension(600, 400));
+
+                    String name = url.toString();
+                    name = name.substring(name.lastIndexOf('/') + 1);
+
+                    JDialog dialog = new JDialog(this, "Apache PDFBox: " + name, true);
+                    dialog.add(new JScrollPane(editor));
+                    dialog.pack();
+                    dialog.setVisible(true);
+                }
+            }
+            catch (IOException ex)
+            {
+                new ErrorDialog(ex).setVisible(true);
+            }
+        }
     }
 }

@@ -88,7 +88,7 @@ public class PDFText2HTML extends PDFTextStripper
     protected String getTitle()
     {
         String titleGuess = document.getDocumentInformation().getTitle();
-        if(titleGuess != null && titleGuess.length() > 0)
+        if(titleGuess != null && !titleGuess.isEmpty())
         {
             return titleGuess;
         }
@@ -239,7 +239,7 @@ public class PDFText2HTML extends PDFTextStripper
                 builder.append("&gt;");
                 break;
             default:
-                builder.append(String.valueOf(character));
+                builder.append(character);
             }
         }
     }

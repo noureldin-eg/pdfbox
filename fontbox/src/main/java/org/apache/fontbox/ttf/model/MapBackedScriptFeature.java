@@ -19,6 +19,7 @@ package org.apache.fontbox.ttf.model;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 /**
@@ -32,9 +33,9 @@ public class MapBackedScriptFeature implements ScriptFeature
 {
 
     private final String name;
-    private final Map<List<Integer>, Integer> featureMap;
+    private final Map<List<Integer>, List<Integer>> featureMap;
 
-    public MapBackedScriptFeature(String name, Map<List<Integer>, Integer> featureMap)
+    public MapBackedScriptFeature(String name, Map<List<Integer>, List<Integer>> featureMap)
     {
         this.name = name;
         this.featureMap = featureMap;
@@ -59,7 +60,7 @@ public class MapBackedScriptFeature implements ScriptFeature
     }
 
     @Override
-    public Integer getReplacementForGlyphs(List<Integer> glyphIds)
+    public List<Integer> getReplacementForGlyphs(List<Integer> glyphIds)
     {
         if (!canReplaceGlyphs(glyphIds))
         {
@@ -72,11 +73,7 @@ public class MapBackedScriptFeature implements ScriptFeature
     @Override
     public int hashCode()
     {
-        final int prime = 31;
-        int result = 1;
-        result = prime * result + ((featureMap == null) ? 0 : featureMap.hashCode());
-        result = prime * result + ((name == null) ? 0 : name.hashCode());
-        return result;
+        return Objects.hash(featureMap, name);
     }
 
     @Override
@@ -86,37 +83,11 @@ public class MapBackedScriptFeature implements ScriptFeature
         {
             return true;
         }
-        if (obj == null)
-        {
-            return false;
-        }
-        if (getClass() != obj.getClass())
+        if (obj == null || getClass() != obj.getClass())
         {
             return false;
         }
         MapBackedScriptFeature other = (MapBackedScriptFeature) obj;
-        if (featureMap == null)
-        {
-            if (other.featureMap != null)
-            {
-                return false;
-            }
-        }
-        else if (!featureMap.equals(other.featureMap))
-        {
-            return false;
-        }
-        if (name == null)
-        {
-            if (other.name != null)
-            {
-                return false;
-            }
-        }
-        else if (!name.equals(other.name))
-        {
-            return false;
-        }
-        return true;
+        return Objects.equals(other.name, this.name) && Objects.equals(other.featureMap, this.featureMap);
     }
 }

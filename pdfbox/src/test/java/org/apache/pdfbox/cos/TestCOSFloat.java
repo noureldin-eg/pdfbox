@@ -347,7 +347,7 @@ class TestCOSFloat extends TestCOSNumber
     {
         double largeValue = Float.MAX_VALUE * 10d;
 
-        assertEquals(1, Double.compare(largeValue, Float.MIN_VALUE),
+        assertEquals(1, Double.compare(largeValue, Float.MAX_VALUE),
                 "Test must be performed with a value larger than Float.MAX_VALUE.");
 
         // 1.4012984643248171E-46
@@ -384,13 +384,18 @@ class TestCOSFloat extends TestCOSNumber
 
         cosFloat = new COSFloat("0.-262");
         assertEquals(new COSFloat("-0.262"), cosFloat);
+        
+        cosFloat = new COSFloat("-0.-262");
+        assertEquals(new COSFloat("-0.262"), cosFloat);
+        
+        cosFloat = new COSFloat("-12.-1");
+        assertEquals(new COSFloat("-12.1"), cosFloat);
     }
 
     @Test
     void testDuplicateMisplacedNegative()
     {
         assertThrows(IOException.class, () -> new COSFloat("0.-26-2"));
-        assertThrows(IOException.class, () -> new COSFloat("-0.-262"));
         assertThrows(IOException.class, () -> new COSFloat("---0.262"));
         assertThrows(IOException.class, () -> new COSFloat("--0.2-62"));
     }

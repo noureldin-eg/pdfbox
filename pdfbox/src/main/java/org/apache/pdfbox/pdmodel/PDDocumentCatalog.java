@@ -20,8 +20,8 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
 
 import org.apache.pdfbox.cos.COSArray;
 import org.apache.pdfbox.cos.COSBase;
@@ -58,7 +58,7 @@ import org.apache.pdfbox.pdmodel.interactive.viewerpreferences.PDViewerPreferenc
  */
 public class PDDocumentCatalog implements COSObjectable
 {
-    private static final Log LOG = LogFactory.getLog(PDDocumentCatalog.class);
+    private static final Logger LOG = LogManager.getLogger(PDDocumentCatalog.class);
     
     private final COSDictionary root;
     private final PDDocument document;
@@ -220,6 +220,7 @@ public class PDDocumentCatalog implements COSObjectable
         if (array == null)
         {
             array = new COSArray();
+            array.setDirect(false);
             root.setItem(COSName.THREADS, array);
         }
         List<PDThread> pdObjects = new ArrayList<>(array.size());
@@ -237,7 +238,9 @@ public class PDDocumentCatalog implements COSObjectable
      */
     public void setThreads(List<PDThread> threads)
     {
-        root.setItem(COSName.THREADS, new COSArray(threads));
+        COSArray threadsArray = new COSArray(threads);
+        threadsArray.setDirect(false);
+        root.setItem(COSName.THREADS, threadsArray);
     }
 
     /**
@@ -403,7 +406,7 @@ public class PDDocumentCatalog implements COSObjectable
     /**
      * Get the list of OutputIntents defined in the document.
      *
-     * @return The list of PDOutputIntent
+     * @return The list of PDOutputIntent, never null.
      */
     public List<PDOutputIntent> getOutputIntents()
     {
@@ -473,7 +476,7 @@ public class PDDocumentCatalog implements COSObjectable
             }
             catch (IllegalArgumentException e)
             {
-                LOG.debug("Invalid PageMode used '" + mode + "' - setting to PageMode.USE_NONE", e);
+                LOG.debug(() -> "Invalid PageMode used '" + mode + "' - setting to PageMode.USE_NONE", e);
                 return PageMode.USE_NONE;
             }
         }
@@ -509,7 +512,8 @@ public class PDDocumentCatalog implements COSObjectable
             }
             catch (IllegalArgumentException e)
             {
-                LOG.warn("Invalid PageLayout used '" + mode + "' - returning PageLayout.SINGLE_PAGE", e);
+                LOG.warn(() -> "Invalid PageLayout used '" + mode + "' - returning PageLayout.SINGLE_PAGE",
+                        e);
             }
         }
         return PageLayout.SINGLE_PAGE;

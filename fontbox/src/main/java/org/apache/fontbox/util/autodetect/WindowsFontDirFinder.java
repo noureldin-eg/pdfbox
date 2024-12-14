@@ -17,16 +17,11 @@
 
 package org.apache.fontbox.util.autodetect;
 
-import java.io.BufferedReader;
 import java.io.File;
-import java.io.IOException;
-import java.io.InputStreamReader;
-import java.nio.charset.StandardCharsets;
 import java.util.List;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
-
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
 
 /**
  * FontFinder for native Windows platforms. This class is based on a class provided by Apache FOP. see
@@ -35,30 +30,7 @@ import org.apache.commons.logging.LogFactory;
 public class WindowsFontDirFinder implements FontDirFinder
 {
 
-    private static final Log LOG = LogFactory.getLog(WindowsFontDirFinder.class);
-
-    /**
-     * Attempts to read windir environment variable on windows (disclaimer: This is a bit dirty but seems to work
-     * nicely).
-     */
-    private String getWinDir(String osName) throws IOException
-    {
-        Process process;
-        Runtime runtime = Runtime.getRuntime();
-        if (osName.startsWith("Windows 9"))
-        {
-            process = runtime.exec("command.com /c echo %windir%");
-        }
-        else
-        {
-            process = runtime.exec("cmd.exe /c echo %windir%");
-        }
-        try (BufferedReader bufferedReader = new BufferedReader(new InputStreamReader(
-                process.getInputStream(), StandardCharsets.ISO_8859_1)))
-        {
-            return bufferedReader.readLine();
-        }
-    }
+    private static final Logger LOG = LogManager.getLogger(WindowsFontDirFinder.class);
 
     /**
      * {@inheritDoc}
@@ -84,9 +56,9 @@ public class WindowsFontDirFinder implements FontDirFinder
         {
             try
             {
-                windir = getWinDir(osName);
+                windir = System.getenv("windir");
             }
-            catch (IOException | SecurityException e)
+            catch (SecurityException e)
             {
                 LOG.debug("Couldn't get Windows font directories - ignoring", e);
                 // should continue if this fails

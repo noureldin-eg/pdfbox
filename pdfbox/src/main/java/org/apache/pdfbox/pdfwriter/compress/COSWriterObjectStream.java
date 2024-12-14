@@ -25,8 +25,8 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
-import org.apache.pdfbox.contentstream.operator.Operator;
-import org.apache.pdfbox.contentstream.operator.OperatorName;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.apache.pdfbox.cos.COSArray;
 import org.apache.pdfbox.cos.COSBase;
 import org.apache.pdfbox.cos.COSBoolean;
@@ -52,6 +52,8 @@ import org.apache.pdfbox.pdfwriter.COSWriter;
  */
 public class COSWriterObjectStream
 {
+    private static final Logger LOG = LogManager.getLogger(COSWriterObjectStream.class);
+
     private final COSWriterCompressionPool compressionPool;
     private final List<COSObjectKey> preparedKeys = new ArrayList<>();
     private final List<COSBase> preparedObjects = new ArrayList<>();
@@ -163,41 +165,40 @@ public class COSWriterObjectStream
      * @param topLevel True, if the currently written object is a top level entry of this object stream.
      * @throws IOException Shall be thrown, when an exception occurred for the write operation.
      */
-    private void writeObject(OutputStream output, Object object, boolean topLevel)
+    private void writeObject(OutputStream output, COSBase object, boolean topLevel)
             throws IOException
     {
         if (object == null)
         {
             return;
         }
-        if (object instanceof Operator)
-        {
-            writeOperator(output, (Operator) object);
-            return;
-        }
         if (!(object instanceof COSBase))
         {
             throw new IOException("Error: Unknown type in object stream:" + object);
         }
-        COSBase base = null;
+        COSBase base;
         if (object instanceof COSObject)
         {
-            base = ((COSObject) object).getObject();
             if (!topLevel)
             {
-                COSObjectKey actualKey = ((COSObject) object).getKey();
-                // the object reference can't be dereferenced be lenient and write the reference nevertheless
-                // or the object is part of a compressed object stream and shouldn't be written directly
-                if (base == null || (actualKey != null && preparedKeys.contains(actualKey)))
+                COSObjectKey actualKey = object.getKey();
+                if (actualKey != null)
                 {
                     writeObjectReference(output, actualKey);
                     return;
                 }
             }
+            base = ((COSObject) object).getObject();
+            if (base == null)
+            {
+                LOG.debug("Can't dereference indirect object, writing COSNull instead {}", object);
+                writeCOSNull(output);
+                return;
+            }
         }
         else
         {
-            base = (COSBase) object;
+            base = object;
         }
         if (!topLevel && this.compressionPool.contains(base))
         {
@@ -382,35 +383,5 @@ public class COSWriterObjectStream
     {
         output.write("null".getBytes(StandardCharsets.ISO_8859_1));
         output.write(COSWriter.SPACE);
-    }
-
-    /**
-     * Write the given {@link Operator} to the given stream.
-     *
-     * @param output The stream, that shall be written to.
-     * @param operator The content, that shall be written.
-     */
-    private void writeOperator(OutputStream output, Operator operator) throws IOException
-    {
-        if (operator.getName().equals(OperatorName.BEGIN_INLINE_IMAGE))
-        {
-            output.write(OperatorName.BEGIN_INLINE_IMAGE.getBytes(StandardCharsets.ISO_8859_1));
-            COSDictionary dic = operator.getImageParameters();
-            for (COSName key : dic.keySet())
-            {
-                Object value = dic.getDictionaryObject(key);
-                key.writePDF(output);
-                output.write(COSWriter.SPACE);
-                writeObject(output, value, false);
-            }
-            output.write(
-                    OperatorName.BEGIN_INLINE_IMAGE_DATA.getBytes(StandardCharsets.ISO_8859_1));
-            output.write(operator.getImageData());
-            output.write(OperatorName.END_INLINE_IMAGE.getBytes(StandardCharsets.ISO_8859_1));
-        }
-        else
-        {
-            output.write(operator.getName().getBytes(StandardCharsets.ISO_8859_1));
-        }
     }
 }

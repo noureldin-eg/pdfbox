@@ -23,12 +23,14 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
 import org.apache.fontbox.ttf.CmapLookup;
 import org.apache.fontbox.ttf.model.GsubData;
 import org.apache.fontbox.ttf.model.ScriptFeature;
+
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 /**
  * 
@@ -39,8 +41,7 @@ import org.apache.fontbox.ttf.model.ScriptFeature;
  */
 public class GsubWorkerForBengali implements GsubWorker
 {
-
-    private static final Log LOG = LogFactory.getLog(GsubWorkerForBengali.class);
+    private static final Logger LOG = LogManager.getLogger(GsubWorkerForBengali.class);
 
     private static final String INIT_FEATURE = "init";
 
@@ -52,8 +53,8 @@ public class GsubWorkerForBengali implements GsubWorker
             "rphf", "blwf", "pstf", "half", "vatu", "cjct", INIT_FEATURE, "pres", "abvs", "blws",
             "psts", "haln", "calt");
 
-    private static final char[] BEFORE_HALF_CHARS = new char[] { '\u09BF', '\u09C7', '\u09C8' };
-    private static final BeforeAndAfterSpanComponent[] BEFORE_AND_AFTER_SPAN_CHARS = new BeforeAndAfterSpanComponent[] {
+    private static final char[] BEFORE_HALF_CHARS = { '\u09BF', '\u09C7', '\u09C8' };
+    private static final BeforeAndAfterSpanComponent[] BEFORE_AND_AFTER_SPAN_CHARS = {
             new BeforeAndAfterSpanComponent('\u09CB', '\u09C7', '\u09BE'),
             new BeforeAndAfterSpanComponent('\u09CC', '\u09C7', '\u09D7') };
 
@@ -81,11 +82,11 @@ public class GsubWorkerForBengali implements GsubWorker
         {
             if (!gsubData.isFeatureSupported(feature))
             {
-                LOG.debug("the feature " + feature + " was not found");
+                LOG.debug("the feature {} was not found", feature);
                 continue;
             }
 
-            LOG.debug("applying the feature " + feature);
+            LOG.debug("applying the feature {}", feature);
 
             ScriptFeature scriptFeature = gsubData.getFeature(feature);
 
@@ -145,9 +146,17 @@ public class GsubWorkerForBengali implements GsubWorker
     private List<Integer> applyGsubFeature(ScriptFeature scriptFeature,
             List<Integer> originalGlyphs)
     {
+        Set<List<Integer>> allGlyphIdsForSubstitution = scriptFeature.getAllGlyphIdsForSubstitution();
+        if (allGlyphIdsForSubstitution.isEmpty())
+        {
+            // not stopping here results in really weird output, the regex goes wild
+            LOG.debug("getAllGlyphIdsForSubstitution() for {} is empty",
+                        scriptFeature.getName());
+            return originalGlyphs;
+        }
 
         GlyphArraySplitter glyphArraySplitter = new GlyphArraySplitterRegexImpl(
-                scriptFeature.getAllGlyphIdsForSubstitution());
+                allGlyphIdsForSubstitution);
 
         List<List<Integer>> tokens = glyphArraySplitter.split(originalGlyphs);
 
@@ -158,8 +167,8 @@ public class GsubWorkerForBengali implements GsubWorker
             if (scriptFeature.canReplaceGlyphs(chunk))
             {
                 // gsub system kicks in, you get the glyphId directly
-                Integer glyphId = scriptFeature.getReplacementForGlyphs(chunk);
-                gsubProcessedGlyphs.add(glyphId);
+                List<Integer> replacementForGlyphs = scriptFeature.getReplacementForGlyphs(chunk);
+                gsubProcessedGlyphs.addAll(replacementForGlyphs);
             }
             else
             {
@@ -167,8 +176,8 @@ public class GsubWorkerForBengali implements GsubWorker
             }
         });
 
-        LOG.debug("originalGlyphs: " + originalGlyphs + ", gsubProcessedGlyphs: "
-                + gsubProcessedGlyphs);
+        LOG.debug("originalGlyphs: {}, gsubProcessedGlyphs: {}", 
+                originalGlyphs, gsubProcessedGlyphs);
 
         return gsubProcessedGlyphs;
     }
@@ -187,7 +196,7 @@ public class GsubWorkerForBengali implements GsubWorker
             ScriptFeature feature = gsubData.getFeature(INIT_FEATURE);
             for (List<Integer> glyphCluster : feature.getAllGlyphIdsForSubstitution())
             {
-                glyphIds.add(feature.getReplacementForGlyphs(glyphCluster));
+                glyphIds.addAll(feature.getReplacementForGlyphs(glyphCluster));
             }
         }
 

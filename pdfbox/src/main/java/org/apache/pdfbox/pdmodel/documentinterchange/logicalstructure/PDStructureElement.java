@@ -16,6 +16,7 @@
  */
 package org.apache.pdfbox.pdmodel.documentinterchange.logicalstructure;
 
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.Map;
@@ -29,6 +30,7 @@ import org.apache.pdfbox.cos.COSNumber;
 import org.apache.pdfbox.cos.COSObject;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.documentinterchange.markedcontent.PDMarkedContent;
+import org.apache.pdfbox.pdmodel.documentinterchange.taggedpdf.StandardStructureTypes;
 
 /**
  * A structure element.
@@ -44,8 +46,9 @@ public class PDStructureElement extends PDStructureNode
     /**
      * Constructor with required values.
      *
-     * @param structureType the structure type
-     * @param parent the parent structure node
+     * @param structureType The structure type. Constants are available in the
+     * {@link StandardStructureTypes} class.
+     * @param parent The parent structure node.
      */
     public PDStructureElement(String structureType, PDStructureNode parent)
     {
@@ -312,9 +315,7 @@ public class PDStructureElement extends PDStructureNode
         }
         else
         {
-            COSArray array = new COSArray();
-            array.add(a);
-            array.add(COSInteger.get(this.getRevisionNumber()));
+            COSArray array = new COSArray(Arrays.asList(a, COSInteger.get(this.getRevisionNumber())));
             this.getCOSObject().setItem(key, array);
         }
     }
@@ -617,7 +618,23 @@ public class PDStructureElement extends PDStructureNode
     /**
      * Appends a marked-content sequence kid.
      * 
-     * @param markedContent the marked-content sequence
+     * @param mcid the marked-content id (MCID).
+     * @throws IllegalArgumentException if the mcid is negative.
+     */
+    public void appendKid(int mcid)
+    {
+        if (mcid < 0)
+        {
+            throw new IllegalArgumentException("MCID should not be negative");
+        }
+        this.appendKid(COSInteger.get(mcid));
+    }
+
+    /**
+     * Appends a marked-content sequence kid.
+     * 
+     * @param markedContent the marked-content sequence with the MCID.
+     * @throws IllegalArgumentException if the mcid is negative or doesn't exist.
      */
     public void appendKid(PDMarkedContent markedContent)
     {
@@ -625,7 +642,12 @@ public class PDStructureElement extends PDStructureNode
         {
             return;
         }
-        this.appendKid(COSInteger.get(markedContent.getMCID()));
+        int mcid = markedContent.getMCID();
+        if (mcid < 0)
+        {
+            throw new IllegalArgumentException("MCID is negative or doesn't exist");
+        }
+        this.appendKid(COSInteger.get(mcid));
     }
 
     /**

@@ -23,7 +23,7 @@
     <parent>
         <groupId>org.apache.pdfbox</groupId>
         <artifactId>pdfbox-parent</artifactId>
-        <version>3.0.0-SNAPSHOT</version>
+        <version>4.0.0-SNAPSHOT</version>
         <relativePath>../parent/pom.xml</relativePath>
     </parent>
 
@@ -35,7 +35,13 @@
         The Apache PDFBox library is an open source Java tool for working with PDF documents.
     </description>
     <inceptionYear>2002</inceptionYear>
-    
+
+	<scm>
+		<connection>scm:svn:https://svn.apache.org/repos/asf/pdfbox/trunk/pdfbox</connection>
+		<developerConnection>scm:svn:https://svn.apache.org/repos/asf/pdfbox/trunk/pdfbox</developerConnection>
+		<url>https://svn.apache.org/viewvc/pdfbox/trunk/pdfbox</url>
+	</scm>
+
     <properties>
     	<git.scmJavadocUrl>git:https://git-wip-us.apache.org/repos/asf/pdfbox-docs//content/docs/${project.version}/javadocs</git.scmJavadocUrl>
     </properties>
@@ -43,7 +49,7 @@
     <dependencies>
         <dependency>
             <groupId>org.apache.pdfbox</groupId>
-            <artifactId>io</artifactId>
+            <artifactId>pdfbox-io</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>
@@ -52,22 +58,24 @@
             <version>${project.version}</version>
         </dependency>
         <dependency>
-            <groupId>commons-logging</groupId>
-            <artifactId>commons-logging</artifactId>
-        </dependency>
-        <dependency>
             <groupId>org.bouncycastle</groupId>
-            <artifactId>bcmail-jdk18on</artifactId>
+            <artifactId>bcprov-jdk18on</artifactId>
+            <version>${bouncycastle.version}</version>
+            <scope>compile</scope>
             <optional>true</optional>
         </dependency>
         <dependency>
             <groupId>org.bouncycastle</groupId>
-            <artifactId>bcprov-jdk18on</artifactId>
+            <artifactId>bcpkix-jdk18on</artifactId>
+            <version>${bouncycastle.version}</version>
+            <scope>compile</scope>
             <optional>true</optional>
         </dependency>
         <dependency>
 	      <groupId>org.junit.jupiter</groupId>
 	      <artifactId>junit-jupiter</artifactId>
+          <version>${junit.version}</version>
+          <scope>test</scope>
 	    </dependency>
         <dependency>
             <groupId>com.googlecode.java-diff-utils</groupId>
@@ -78,12 +86,13 @@
         <dependency>
             <groupId>org.apache.pdfbox</groupId>
             <artifactId>jbig2-imageio</artifactId>
+            <version>${jbig2.version}</version>
             <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.mockito</groupId>
             <artifactId>mockito-core</artifactId>
-            <version>4.11.0</version>
+            <version>5.14.2</version>
             <scope>test</scope>
         </dependency>
         <!-- For legal reasons (incompatible license), these three dependencies below
@@ -92,11 +101,22 @@
         <dependency>
             <groupId>com.github.jai-imageio</groupId>
             <artifactId>jai-imageio-core</artifactId>
+            <version>${jai.version}</version>
             <scope>test</scope>
         </dependency>    
         <dependency>
             <groupId>com.github.jai-imageio</groupId>
             <artifactId>jai-imageio-jpeg2000</artifactId>
+            <version>${jai.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.logging.log4j</groupId>
+            <artifactId>log4j-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.logging.log4j</groupId>
+            <artifactId>log4j-core</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>
@@ -729,6 +749,45 @@
                             <outputDirectory>${project.build.directory}/fonts</outputDirectory>
                             <outputFileName>PDFBOX-5484.ttf</outputFileName>
                             <sha512>7c3d8bbc18654315d6341a277dcd5c66218b95c43baf190b6e32f77817d17bab421ef76f2c904b46c97f84c49b00d58525449cff970897010534d6aa2812a4e2</sha512>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>PDFBOX-5639</id>
+                        <phase>generate-test-resources</phase>
+                        <goals>
+                            <goal>wget</goal>
+                        </goals>
+                        <configuration>
+                            <url>https://issues.apache.org/jira/secure/attachment/13061409/incorrect_password.pdf</url>
+                            <outputDirectory>${project.build.directory}/pdfs</outputDirectory>
+                            <outputFileName>PDFBOX-5639.pdf</outputFileName>
+                            <sha512>6904a5f8fe12599a4ca49914158024ebd3533cb2e1ef02127d9d99291c20e68c449cd40ba00f2a8d1295b083fcffd44b30ed1ce5a16bfcd0bb37a25f8581c67d</sha512>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>PDFBOX-5742</id>
+                        <phase>generate-test-resources</phase>
+                        <goals>
+                            <goal>wget</goal>
+                        </goals>
+                        <configuration>
+                            <url>https://issues.apache.org/jira/secure/attachment/13065529/source.pdf</url>
+                            <outputDirectory>${project.build.directory}/pdfs</outputDirectory>
+                            <outputFileName>PDFBOX-5742.pdf</outputFileName>
+                            <sha512>1c645cc1a6da616cf1af23b623562161493c79c2f8382622515138628cfee71fb318fdebd0b7167d9bdac92119928d57f39de213089f7f1832296ea068189380</sha512>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>PDFBOX-5894</id>
+                        <phase>generate-test-resources</phase>
+                        <goals>
+                            <goal>wget</goal>
+                        </goals>
+                        <configuration>
+                            <url>https://issues.apache.org/jira/secure/attachment/13072508/sticky-notes.fdf</url>
+                            <outputDirectory>${project.build.directory}/pdfs</outputDirectory>
+                            <outputFileName>PDFBOX-5894.fdf</outputFileName>
+                            <sha512>995b25abc41bcb3e89f93d1495d4e178010c7dfbbdd55fed71de395d3798a83575b619c333a22386d441152f821debffd01c26494bef86cb35ef0d04e0198a3b</sha512>
                         </configuration>
                     </execution>
                 </executions>

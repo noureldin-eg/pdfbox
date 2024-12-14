@@ -25,9 +25,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
-import java.net.URL;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+import java.util.TreeSet;
 
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.cos.COSDictionary;
@@ -43,6 +46,8 @@ import org.apache.pdfbox.pdmodel.font.PDType1Font;
 import org.apache.pdfbox.pdmodel.font.Standard14Fonts.FontName;
 import org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotation;
 import org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotationWidget;
+import org.apache.pdfbox.pdmodel.interactive.annotation.PDAppearanceDictionary;
+import org.apache.pdfbox.pdmodel.interactive.annotation.PDAppearanceEntry;
 import org.apache.pdfbox.rendering.TestPDFToImage;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -209,7 +214,6 @@ class PDAcroFormTest
         catch (IOException e)
         {
             System.err.println("Couldn't create test document, test skipped");
-            return;
         }
     }
     
@@ -249,7 +253,6 @@ class PDAcroFormTest
         catch (IOException e)
         {
             System.err.println("Couldn't create test document, test skipped");
-            return;
         }
     }
 
@@ -352,14 +355,15 @@ class PDAcroFormTest
      * PDFBOX-3777 Illegal Fields definition COSDictionary instead of Array
      * 
      * @throws IOException
+     * @throws URISyntaxException
      */
     @Test
-    void testIllegalFieldsDefinition() throws IOException
+    void testIllegalFieldsDefinition() throws IOException, URISyntaxException
     {
         String sourceUrl = "https://issues.apache.org/jira/secure/attachment/12866226/D1790B.PDF";
 
         try (PDDocument testPdf = Loader.loadPDF(
-                RandomAccessReadBuffer.createBufferFromStream(new URL(sourceUrl).openStream())))
+                RandomAccessReadBuffer.createBufferFromStream(new URI(sourceUrl).toURL().openStream())))
         {
             PDDocumentCatalog catalog = testPdf.getDocumentCatalog();
 
@@ -367,6 +371,41 @@ class PDAcroFormTest
         }
     }
 
+    /**
+     * Test for names with invalid UTF-8.
+     * 
+     * @throws IOException
+     * @throws URISyntaxException 
+     */
+    @Test
+    void testPDFBox3347() throws IOException, URISyntaxException
+    {
+        String sourceUrl = "https://issues.apache.org/jira/secure/attachment/12968302/KYF%20211%20Best%C3%A4llning%202014.pdf";
+
+        try (PDDocument doc = Loader.loadPDF(
+                RandomAccessReadBuffer.createBufferFromStream(new URI(sourceUrl).toURL().openStream())))
+        {
+            PDField field = doc.getDocumentCatalog().getAcroForm().getField("Krematorier");
+            List<PDAnnotationWidget> widgets = field.getWidgets();
+            Set<String> set = new TreeSet<>();
+            for (PDAnnotationWidget annot : widgets)
+            {
+                PDAppearanceDictionary ap = annot.getAppearance();
+                PDAppearanceEntry normalAppearance = ap.getNormalAppearance();
+                Set<COSName> nameSet = normalAppearance.getSubDictionary().keySet();
+                assertTrue(nameSet.contains(COSName.Off));
+                for (COSName name : nameSet)
+                {
+                    if (!name.equals(COSName.Off))
+                    {
+                        set.add(name.getName());
+                    }
+                }
+            }
+            assertEquals("[Nynäshamn, Råcksta, Silverdal, Skogskrem, St Botvid, Storkällan]",
+                    set.toString());
+        }
+    }
 
     @AfterEach
     public void tearDown() throws IOException

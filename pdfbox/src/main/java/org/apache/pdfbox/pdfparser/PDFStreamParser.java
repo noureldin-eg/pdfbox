@@ -20,8 +20,8 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
 import org.apache.pdfbox.contentstream.PDContentStream;
 import org.apache.pdfbox.contentstream.operator.Operator;
 import org.apache.pdfbox.contentstream.operator.OperatorName;
@@ -43,7 +43,7 @@ public class PDFStreamParser extends BaseParser
     /**
      * Log instance.
      */
-    private static final Log LOG = LogFactory.getLog(PDFStreamParser.class);
+    private static final Logger LOG = LogManager.getLogger(PDFStreamParser.class);
 
     private static final int MAX_BIN_CHAR_TEST_LENGTH = 10;
     private final byte[] binCharTestArr = new byte[MAX_BIN_CHAR_TEST_LENGTH];
@@ -56,7 +56,7 @@ public class PDFStreamParser extends BaseParser
      */
     public PDFStreamParser(PDContentStream pdContentstream) throws IOException
     {
-        super(pdContentstream.getContentsForRandomAccess());
+        super(pdContentstream.getContentsForStreamParsing());
     }
 
     /**
@@ -95,10 +95,14 @@ public class PDFStreamParser extends BaseParser
      */
     public Object parseNextToken() throws IOException
     {
+        if (source.isClosed())
+        {
+            return null;
+        }
         skipSpaces();
         if (source.isEOF())
         {
-            source.close();
+            close();
             return null;
         }
         char c = (char) source.peek();
@@ -116,7 +120,17 @@ public class PDFStreamParser extends BaseParser
 
                 if (c == '<')
                 {
-                    return parseCOSDictionary(true);
+                    try
+                    {
+                        return parseCOSDictionary(true);
+                    }
+                    catch (IOException exception)
+                    {
+                        LOG.warn("Stop reading invalid dictionary from content stream at offset {}",
+                                source.getPosition());
+                        close();
+                        return null;
+                    }
                 }
                 else
                 {
@@ -124,7 +138,17 @@ public class PDFStreamParser extends BaseParser
                 }
             case '[':
                 // array
-                return parseCOSArray();
+                try
+                {
+                    return parseCOSArray();
+                }
+                catch (IOException exception)
+                {
+                    LOG.warn("Stop reading invalid array from content stream at offset {}",
+                            source.getPosition());
+                    close();
+                    return null;
+                }
             case '(':
                 // string
                 return parseCOSString();
@@ -198,7 +222,14 @@ public class PDFStreamParser extends BaseParser
                         dotNotRead = false;
                     }
                 }
-                return COSNumber.get(buf.toString());
+                String s = buf.toString();
+                if ("+".equals(s))
+                {
+                    // PDFBOX-5906
+                    LOG.warn("isolated '+' is ignored");
+                    return COSNull.NULL;
+                }
+                return COSNumber.get(s);
             case 'B':
                 String nextOperator = readString();
                 Operator beginImageOP = Operator.getOperator(nextOperator);
@@ -212,8 +243,8 @@ public class PDFStreamParser extends BaseParser
                         Object value = parseNextToken();
                         if (!(value instanceof COSBase))
                         {
-                            LOG.warn("Unexpected token in inline image dictionary at offset " +
-                                    source.getPosition());
+                            LOG.warn("Unexpected token in inline image dictionary at offset {}",
+                                    source.isClosed() ? "EOF" : source.getPosition());
                             break;
                         }
                         imageParams.setItem( (COSName)nextToken, (COSBase)value );
@@ -224,7 +255,8 @@ public class PDFStreamParser extends BaseParser
                         Operator imageData = (Operator) nextToken;
                         if (imageData.getImageData() == null || imageData.getImageData().length == 0)
                         {
-                            LOG.warn("empty inline image at stream offset " + source.getPosition());
+                            LOG.warn("empty inline image at stream offset {}",
+                                    source.getPosition());
                         }
                         beginImageOP.setImageData(imageData.getImageData());
                     }
@@ -235,8 +267,10 @@ public class PDFStreamParser extends BaseParser
                 String id = Character.toString((char) source.read()) + (char) source.read();
                 if (!id.equals(OperatorName.BEGIN_INLINE_IMAGE_DATA))
                 {
+                    long currentPosition = source.getPosition();
+                    close();
                     throw new IOException( "Error: Expected operator 'ID' actual='" + id +
-                            "' at stream offset " + source.getPosition());
+                            "' at stream offset " + currentPosition);
                 }
                 ByteArrayOutputStream imageData = new ByteArrayOutputStream();
                 if( isWhitespace() )
@@ -276,7 +310,7 @@ public class PDFStreamParser extends BaseParser
             default:
                 // we must be an operator
                 String operator = readOperator().trim();
-                if (operator.length() > 0)
+                if (!operator.isEmpty())
                 {
                     return Operator.getOperator(operator);
                 }
@@ -351,7 +385,8 @@ public class PDFStreamParser extends BaseParser
         }
         if (!noBinData)
         {
-            LOG.warn("ignoring 'EI' assumed to be in the middle of inline image at stream offset " + 
+            LOG.warn(
+                    "ignoring 'EI' assumed to be in the middle of inline image at stream offset {}",
                     source.getPosition());
         }
         return noBinData;
@@ -380,6 +415,7 @@ public class PDFStreamParser extends BaseParser
             nextChar != '<' &&
             nextChar != '(' &&
             nextChar != '/' &&
+            nextChar != '%' &&
             (nextChar < '0' ||
              nextChar > '9' ) )
         {
@@ -412,4 +448,18 @@ public class PDFStreamParser extends BaseParser
     {
         return isSpaceOrReturn(source.peek());
     }
+
+    /**
+     * Close the underlying resource.
+     * 
+     * @throws IOException if something went wrong
+     */
+    public void close() throws IOException
+    {
+        if (source != null && !source.isClosed())
+        {
+            source.close();
+        }
+    }
+
 }

@@ -24,8 +24,8 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.List;
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
 import org.apache.fontbox.util.BoundingBox;
 import org.apache.pdfbox.contentstream.operator.Operator;
 import org.apache.pdfbox.cos.COSDictionary;
@@ -41,6 +41,9 @@ import org.apache.pdfbox.pdmodel.font.PDType3CharProc;
 import org.apache.pdfbox.pdmodel.font.PDType3Font;
 import org.apache.pdfbox.pdmodel.font.PDVectorFont;
 import org.apache.pdfbox.pdmodel.graphics.color.PDColor;
+import org.apache.pdfbox.pdmodel.interactive.AppearanceStyle;
+import org.apache.pdfbox.pdmodel.interactive.PlainText;
+import org.apache.pdfbox.pdmodel.interactive.PlainTextFormatter;
 import org.apache.pdfbox.pdmodel.interactive.action.PDAction;
 import org.apache.pdfbox.pdmodel.interactive.action.PDActionJavaScript;
 import org.apache.pdfbox.pdmodel.interactive.action.PDFormFieldAdditionalActions;
@@ -61,7 +64,7 @@ import org.apache.pdfbox.util.Matrix;
  */
 class AppearanceGeneratorHelper
 {
-    private static final Log LOG = LogFactory.getLog(AppearanceGeneratorHelper.class);
+    private static final Logger LOG = LogManager.getLogger(AppearanceGeneratorHelper.class);
 
     private static final Operator BMC = Operator.getOperator("BMC");
     private static final Operator EMC = Operator.getOperator("EMC");
@@ -161,7 +164,8 @@ class AppearanceGeneratorHelper
                 {
                     if (acroFormResources.getFont(fontResourceName) == null)
                     {
-                        LOG.debug("Adding font resource " + fontResourceName + " from widget to AcroForm");
+                        LOG.debug("Adding font resource {} from widget to AcroForm",
+                                fontResourceName);
                         // use the COS-object to preserve a possible indirect object reference
                         acroFormFontDict.setItem(fontResourceName,
                                 widgetFontDict.getItem(fontResourceName));
@@ -200,7 +204,9 @@ class AppearanceGeneratorHelper
         {
             if (widget.getCOSObject().containsKey("PMD"))
             {
-                LOG.warn("widget of field " + field.getFullyQualifiedName() + " is a PaperMetaData widget, no appearance stream created");
+                LOG.warn(
+                        "widget of field {} is a PaperMetaData widget, no appearance stream created",
+                        field.getFullyQualifiedName());
                 continue;
             }
 
@@ -217,7 +223,8 @@ class AppearanceGeneratorHelper
             if (rect == null)
             {
                 widget.getCOSObject().removeItem(COSName.AP);
-                LOG.warn("widget of field " + field.getFullyQualifiedName() + " has no rectangle, no appearance stream created");
+                LOG.warn("widget of field {} has no rectangle, no appearance stream created",
+                        field.getFullyQualifiedName());
                 continue;
             }
 
@@ -402,6 +409,23 @@ class AppearanceGeneratorHelper
                     contents.addRect(clipRect.getLowerLeftX(),clipRect.getLowerLeftY(),clipRect.getWidth(), clipRect.getHeight());
                     contents.closeAndStroke();
                 }
+
+                // draw the dividers for a comb field
+                if (borderColour != null && shallComb()) {
+                    int maxLen = ((PDTextField) field).getMaxLen();
+                    PDRectangle bbox = resolveBoundingBox(widget, appearanceStream);
+                    PDRectangle clipRect = applyPadding(bbox, Math.max(DEFAULT_PADDING, lineWidth/2));
+                    float lowerLeft = clipRect.getLowerLeftX();
+                    float height = clipRect.getHeight();
+                    
+                    float combWidth = bbox.getWidth() / maxLen;
+
+                    for (int i= 0; i < maxLen - 1; i++) {
+                        contents.moveTo(combWidth + combWidth * i, height);
+                        contents.lineTo(combWidth + combWidth * i, lowerLeft);
+                    }
+                    contents.closeAndStroke();
+                }
             }
             
             writeToStream(output.toByteArray(), appearanceStream);
@@ -476,8 +500,9 @@ class AppearanceGeneratorHelper
             {
                 borderWidth = widget.getBorderStyle().getWidth();
             }
-            PDRectangle clipRect = applyPadding(bbox, Math.max(1f, borderWidth));
-            PDRectangle contentRect = applyPadding(clipRect, Math.max(1f, borderWidth));
+            float padding = Math.max(1f, borderWidth);
+            PDRectangle clipRect = applyPadding(bbox, padding);
+            PDRectangle contentRect = applyPadding(clipRect, padding);
             
             contents.saveGraphicsState();
             
@@ -494,15 +519,15 @@ class AppearanceGeneratorHelper
             }
             if (font.getName().contains("+"))
             {
-                LOG.warn("Font '" + defaultAppearance.getFontName().getName() +
-                         "' of field '" + field.getFullyQualifiedName() + 
-                         "' contains subsetted font '" + font.getName() + "'");
+                LOG.warn("Font '{}' of field '{}' contains subsetted font '{}'",
+                        defaultAppearance.getFontName().getName(), field.getFullyQualifiedName(),
+                        font.getName());
                 LOG.warn("This may bring trouble with PDField.setValue(), PDAcroForm.flatten() or " +
                          "PDAcroForm.refreshAppearances()");
                 LOG.warn("You should replace this font with a non-subsetted font:");
                 LOG.warn("PDFont font = PDType0Font.load(doc, new FileInputStream(fontfile), false);");
-                LOG.warn("acroForm.getDefaultResources().put(COSName.getPDFName(\"" +
-                         defaultAppearance.getFontName().getName() + "\", font);");
+                LOG.warn("acroForm.getDefaultResources().put(COSName.getPDFName(\"{}\", font);",
+                        defaultAppearance.getFontName().getName());
             }
             // calculate the fontSize (because 0 = autosize)
             float fontSize = defaultAppearance.getFontSize();
@@ -541,7 +566,8 @@ class AppearanceGeneratorHelper
             } else {
                 float fontCapHeight = resolveCapHeight(font);
                 float fontDescent = resolveDescent(font);
-                LOG.debug("missing font descriptor - resolved Cap/Descent to " + fontCapHeight + "/" + fontDescent);
+                LOG.debug("missing font descriptor - resolved Cap/Descent to {}/{}", fontCapHeight,
+                        fontDescent);
                 fontCapAtSize = fontCapHeight * fontScaleY;
                 fontDescentAtSize = fontDescent * fontScaleY;
             }
@@ -673,6 +699,7 @@ class AppearanceGeneratorHelper
     {
         return field instanceof PDTextField &&
                 ((PDTextField) field).isComb() &&
+                ((PDTextField) field).getMaxLen() != -1 &&
                 !((PDTextField) field).isMultiline() &&
                 !((PDTextField) field).isPassword() &&
                 !((PDTextField) field).isFileSelect();           
@@ -690,30 +717,37 @@ class AppearanceGeneratorHelper
     private void insertGeneratedCombAppearance(PDAppearanceContentStream contents, PDAppearanceStream appearanceStream,
             PDFont font, float fontSize) throws IOException
     {
+        if (value == null || value.isEmpty())
+        {
+            return;
+        }
         int maxLen = ((PDTextField) field).getMaxLen();
         int quadding = field.getQ();
         int numChars = Math.min(value.length(), maxLen);
-        
-        PDRectangle paddingEdge = applyPadding(appearanceStream.getBBox(), 1);
-        
+                
         float combWidth = appearanceStream.getBBox().getWidth() / maxLen;
         float ascentAtFontSize = font.getFontDescriptor().getAscent() / FONTSCALE * fontSize;
-        float baselineOffset = paddingEdge.getLowerLeftY() +  
+
+        float baselineOffset = appearanceStream.getBBox().getLowerLeftY() +  
                 (appearanceStream.getBBox().getHeight() - ascentAtFontSize)/2;
         
         float prevCharWidth = 0f;
-        
-        float xOffset = combWidth / 2;
+
+        // set initial offset based on width of first char.
+        float firstCharWidth = font.getStringWidth(value.substring(0, 1)) / FONTSCALE * fontSize;
+        float initialOffset = (combWidth - firstCharWidth)/2;
 
         // add to initial offset if right aligned or centered
         if (quadding == 2)
         {
-            xOffset = xOffset + (maxLen - numChars) * combWidth;
+            initialOffset = initialOffset + (maxLen - numChars) * combWidth;
         }
         else if (quadding == 1)
         {
-            xOffset = xOffset + Math.floorDiv(maxLen - numChars, 2) * combWidth;
+            initialOffset = initialOffset + Math.floorDiv(maxLen - numChars, 2) * combWidth;
         }
+
+        float xOffset = initialOffset;
 
         for (int i = 0; i < numChars; i++) 
         {
@@ -722,7 +756,11 @@ class AppearanceGeneratorHelper
             
             xOffset = xOffset + prevCharWidth/2 - currCharWidth/2;
             
-            contents.newLineAtOffset(xOffset, baselineOffset);
+            if (i == 0) {
+                contents.newLineAtOffset(initialOffset, baselineOffset);
+            } else {
+                contents.newLineAtOffset(xOffset, baselineOffset);
+            }
             contents.showText(combString);
             
             baselineOffset = 0;
@@ -907,6 +945,11 @@ class AppearanceGeneratorHelper
                 }
 
                 float heightBasedFontSize = contentRect.getHeight() / height * yScalingFactor;
+                if (Float.isInfinite(widthBasedFontSize))
+                {
+                    // PDFBOX-5763: avoids -Infinity if empty value and tiny rectangle
+                    return heightBasedFontSize;
+                }
                 
                 return Math.min(heightBasedFontSize, widthBasedFontSize);
             }
@@ -967,7 +1010,7 @@ class AppearanceGeneratorHelper
             path = simpleFont.getPath(name);
         } else {
             // shouldn't happen, please open issue in JIRA
-            LOG.warn("Unknown font class: " + font.getClass());
+            LOG.warn("Unknown font class: {}", font.getClass());
         }
         if (path == null) {
             return -1;

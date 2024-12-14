@@ -24,6 +24,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.Color;
 import java.awt.image.BufferedImage;
+
 import java.io.BufferedInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
@@ -33,16 +34,22 @@ import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
+
+import java.nio.file.Files;
+import java.nio.file.Paths;
+
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.Set;
+
 import javax.imageio.ImageIO;
 import javax.imageio.ImageReader;
 import javax.imageio.metadata.IIOMetadata;
 import javax.imageio.stream.ImageInputStream;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
+
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.cos.COSName;
 import org.apache.pdfbox.io.IOUtils;
@@ -55,7 +62,9 @@ import org.apache.pdfbox.rendering.ImageType;
 import org.apache.pdfbox.rendering.PDFRenderer;
 import org.apache.pdfbox.util.filetypedetector.FileType;
 import org.apache.pdfbox.util.filetypedetector.FileTypeDetector;
+
 import org.junit.jupiter.api.Test;
+
 import org.w3c.dom.Element;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
@@ -65,7 +74,7 @@ import org.w3c.dom.NodeList;
  */
 class TestImageIOUtils
 {
-    private static final Log LOG = LogFactory.getLog(TestImageIOUtils.class);
+    private static final Logger LOG = LogManager.getLogger(TestImageIOUtils.class);
     
     /**
      * Check whether the resource images can be saved.
@@ -119,7 +128,7 @@ class TestImageIOUtils
     private void doTestFile(File file, String outDir) throws IOException
     {
         PDDocument document = null;
-        LOG.info("Preparing to convert " + file.getName());
+        LOG.info("Preparing to convert {}", file.getName());
         try
         {
             float dpi = 36; // low DPI so that rendering is FAST
@@ -260,7 +269,7 @@ class TestImageIOUtils
         PDFRenderer renderer = new PDFRenderer(document);
         BufferedImage image = renderer.renderImageWithDPI(0, dpi, imageType);
         String fileName = outputPrefix + 1;
-        LOG.info("Writing: " + fileName + "." + imageFormat);
+        LOG.info("Writing: {}.{}", fileName, imageFormat);
         System.out.println("  " + fileName + "." + imageFormat); // for Maven (keep me!)
         try (OutputStream os = new FileOutputStream(fileName + "." + imageFormat))
         {
@@ -292,11 +301,7 @@ class TestImageIOUtils
         String inDir = "src/test/resources/input/ImageIOUtil";
         String outDir = "target/test-output/ImageIOUtil/";
 
-        new File(outDir).mkdirs();
-        if (!new File(outDir).exists())
-        {
-            throw new IOException("could not create output directory");
-        }
+        Files.createDirectories(Paths.get(outDir));
 
         File[] testFiles = new File(inDir).listFiles(
                 (dir, name) -> (name.endsWith(".pdf") || name.endsWith(".ai")));

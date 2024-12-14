@@ -18,8 +18,8 @@ package org.apache.pdfbox.cos;
 
 import java.io.IOException;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
 
 /**
  * This class represents a PDF object.
@@ -30,13 +30,11 @@ import org.apache.commons.logging.LogFactory;
 public class COSObject extends COSBase implements COSUpdateInfo
 {
     private COSBase baseObject;
-    private long objectNumber;
-    private int generationNumber;
     private ICOSParser parser;
     private boolean isDereferenced = false;
     private final COSUpdateState updateState;
     
-    private static final Log LOG = LogFactory.getLog(COSObject.class);
+    private static final Logger LOG = LogManager.getLogger(COSObject.class);
 
     /**
      * Constructor.
@@ -90,8 +88,6 @@ public class COSObject extends COSBase implements COSUpdateInfo
     {
         updateState = new COSUpdateState(this);
         this.parser = parser;
-        objectNumber = key.getNumber();
-        generationNumber = key.getGeneration();
         setKey(key);
     }
 
@@ -123,7 +119,7 @@ public class COSObject extends COSBase implements COSUpdateInfo
             }
             catch (IOException e)
             {
-                LOG.error("Can't dereference " + this, e);
+                LOG.error(() -> "Can't dereference " + this, e);
             }
             finally
             {
@@ -152,25 +148,7 @@ public class COSObject extends COSBase implements COSUpdateInfo
     @Override
     public String toString()
     {
-        return "COSObject{" + objectNumber + ", " + generationNumber + "}";
-    }
-
-    /** 
-     * Getter for property objectNumber.
-     * @return Value of property objectNumber.
-     */
-    public long getObjectNumber()
-    {
-        return objectNumber;
-    }
-
-    /** 
-     * Getter for property generationNumber.
-     * @return Value of property generationNumber.
-     */
-    public int getGenerationNumber()
-    {
-        return generationNumber;
+        return "COSObject{" + getKey() + "}";
     }
 
     /**

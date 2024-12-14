@@ -17,6 +17,7 @@
 package org.apache.pdfbox.pdmodel.documentinterchange.logicalstructure;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 import org.apache.pdfbox.cos.COSArray;
@@ -143,7 +144,7 @@ public abstract class PDStructureNode implements COSObjectable
     }
 
     /**
-     * Appends a structure element kid.
+     * Appends a structure element kid and sets the parent property (/P) to this.
      * 
      * @param structureElement the structure element
      */
@@ -193,9 +194,7 @@ public abstract class PDStructureNode implements COSObjectable
         else
         {
             // currently one kid: put current and new kid into array and set array as kids
-            COSArray array = new COSArray();
-            array.add(k);
-            array.add(object);
+            COSArray array = new COSArray(Arrays.asList(k, object));
             this.getCOSObject().setItem(COSName.K, array);
         }
     }
@@ -264,19 +263,17 @@ public abstract class PDStructureNode implements COSObjectable
             }
             if (onlyKid)
             {
-                COSArray array = new COSArray();
-                array.add(newKid);
-                array.add(refKidBase);
+                COSArray array = new COSArray(Arrays.asList(newKid, refKidBase));
                 this.getCOSObject().setItem(COSName.K, array);
             }
         }
     }
 
     /**
-     * Removes a structure element kid.
-     * 
+     * Removes a structure element kid and if successful also removes the parent property (/P).
+     *
      * @param structureElement the structure element
-     * @return <code>true</code> if the kid was removed, <code>false</code> otherwise
+     * @return <code>true</code> if the kid was removed, <code>false</code> otherwise.
      */
     public boolean removeKid(PDStructureElement structureElement)
     {
